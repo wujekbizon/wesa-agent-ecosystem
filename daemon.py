@@ -1,5 +1,5 @@
 """
-WESA Agent Ecosystem - Agent Daemon v0.1
+WESA Agent Ecosystem - Agent Daemon v0.2
 Run this once and leave it running. It watches the tasks/ folder
 and processes any new task files automatically.
 
@@ -12,19 +12,18 @@ Results appear in logs/ with matching task ID.
 
 import time
 import sys
-import json
 from pathlib import Path
 from datetime import datetime
 
-# Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.task import Task, TaskStatus
 from src.router import Router
+from src.notifier import notify_done, notify_failed, notify_started
 
 TASKS_DIR = Path("tasks")
 LOGS_DIR = Path("logs")
-POLL_INTERVAL = 3  # seconds between scans
+POLL_INTERVAL = 3
 
 
 def setup_dirs():
@@ -64,8 +63,6 @@ def process_task(task_path: Path, router: Router):
         return
 
     log(f"Processing task {task.id} [{task.type}] ...")
-
-    # Mark in progress
     task.status = TaskStatus.IN_PROGRESS
     task.save(task_path)
 
@@ -74,27 +71,30 @@ def process_task(task_path: Path, router: Router):
         task.result = result
         task.model_used = model_used
         task.status = TaskStatus.DONE
+        task.completed_at = datetime.now().isoformat()
+        task.save(task_path)
+        write_report(task)
         log(f"Task {task.id} DONE via {model_used}")
+        notify_done(task.id, task.type, model_used)
     except Exception as e:
         task.error = str(e)
         task.status = TaskStatus.FAILED
+        task.completed_at = datetime.now().isoformat()
+        task.save(task_path)
+        write_report(task)
         log(f"Task {task.id} FAILED: {e}")
-
-    task.completed_at = datetime.now().isoformat()
-    task.save(task_path)
-
-    report_path = write_report(task)
-    log(f"Report saved → {report_path}")
+        notify_failed(task.id, str(e))
 
 
 def run():
     setup_dirs()
     router = Router()
 
-    log("=== WESA Agent Daemon v0.1 STARTED ===")
+    log("=== WESA Agent Daemon v0.2 STARTED ===")
     log(f"Watching: {TASKS_DIR.resolve()}")
     log(f"Reports:  {LOGS_DIR.resolve()}")
     log(f"Polling every {POLL_INTERVAL}s. Press Ctrl+C to stop.\n")
+    notify_started()
 
     while True:
         try:
