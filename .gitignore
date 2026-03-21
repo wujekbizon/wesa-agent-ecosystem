@@ -1,0 +1,18 @@
+# Environment - NEVER commit this (contains API keys)
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Logs and task outputs (runtime data, not source code)
+logs/
+tasks/*.json
+!tasks/example_task.json
+
+# OS
+.DS_Store
+Thumbs.db
