@@ -34,6 +34,7 @@ class OllamaAgent:
                     "system": self.system_prompt,
                     "prompt": prompt,
                     "stream": False,
+                    "think": False,
                 },
                 timeout=300,
             )
