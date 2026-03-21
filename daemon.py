@@ -1,5 +1,5 @@
 """
-WESA Agent Ecosystem - Agent Daemon v0.3
+WESA Agent Ecosystem - Agent Daemon v0.4
 Run this once and leave it running. It watches the tasks/ folder
 and processes any new task files automatically.
 
@@ -9,6 +9,11 @@ Usage:
 To submit a task: drop a .json file into the tasks/ folder.
 Results appear in logs/ with matching task ID.
 Axel's briefing is updated at: logs/AXEL_BRIEFING.md
+
+output_file support:
+    Add "output_file": "src/myfile.py" to any task JSON.
+    On completion, daemon strips markdown fences and writes result
+    directly to that path. Axel reviews - does not deploy manually.
 """
 
 import time
@@ -119,7 +124,32 @@ def write_report(task: Task):
     return report_path
 
 
+def strip_code_fences(text: str) -> str:
+    """Strip markdown code fences from agent output before writing to a file."""
+    lines = text.strip().splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines)
+
+
+def write_output_file(task: Task):
+    """If task specifies output_file, write the result directly to that path."""
+    raw = getattr(task, 'output_file', None)
+    if not raw:
+        # also check task JSON directly for output_file
+        return
+    output_path = Path(raw)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(strip_code_fences(task.result), encoding="utf-8")
+    log(f"Output written to {output_path}")
+
+
 def process_task(task_path: Path, router: Router):
+    data = json.loads(task_path.read_text(encoding="utf-8"))
+    output_file = data.get("output_file")
+
     task = Task.from_file(task_path)
 
     if task.status != TaskStatus.PENDING:
@@ -137,6 +167,11 @@ def process_task(task_path: Path, router: Router):
         task.completed_at = datetime.now().isoformat()
         task.save(task_path)
         write_report(task)
+        if output_file:
+            output_path = Path(output_file)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(strip_code_fences(result), encoding="utf-8")
+            log(f"Output written to {output_path}")
         update_briefing()
         log(f"Task {task.id} DONE via {model_used}")
         notify_done(task.id, task.type, model_used)
@@ -155,7 +190,7 @@ def run():
     setup_dirs()
     router = Router()
 
-    log("=== WESA Agent Daemon v0.3 STARTED ===")
+    log("=== WESA Agent Daemon v0.4 STARTED ===")
     log(f"Watching:  {TASKS_DIR.resolve()}")
     log(f"Reports:   {LOGS_DIR.resolve()}")
     log(f"Briefing:  {BRIEFING_FILE.resolve()}")
