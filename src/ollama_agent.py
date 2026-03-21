@@ -1,7 +1,8 @@
 """
 WESA Agent Ecosystem - Ollama Agent
-Handles: code generation, code review (stays local - no data leaves machine)
-Model: qwen3.5:35b (local)
+Handles: code generation and review (stays local - no data leaves machine).
+Model: qwen3.5:35b
+System prompt is injected per-agent from skill YAML files.
 """
 
 import os
@@ -10,38 +11,39 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SYSTEM_PROMPT = """You are a WESA developer agent. You write clean, production-quality code.
-Follow best practices. Add comments where logic is non-obvious. Return only code and brief explanations."""
+DEFAULT_SYSTEM_PROMPT = """You are a WESA developer agent. Write clean, production-quality code.
+Follow best practices. Return only code and brief explanations."""
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:35b")
 
 
 class OllamaAgent:
-    def __init__(self):
+    def __init__(self, system_prompt: str = DEFAULT_SYSTEM_PROMPT, agent_name: str = "OllamaAgent"):
         self.host = OLLAMA_HOST
-        self.model = OLLAMA_MODEL
+        self._model = OLLAMA_MODEL
+        self.system_prompt = system_prompt
+        self.agent_name = agent_name
 
     def run(self, prompt: str) -> str:
         try:
             response = requests.post(
                 f"{self.host}/api/generate",
                 json={
-                    "model": self.model,
-                    "prompt": f"{SYSTEM_PROMPT}\n\n{prompt}",
+                    "model": self._model,
+                    "system": self.system_prompt,
+                    "prompt": prompt,
                     "stream": False,
                 },
-                timeout=120,
+                timeout=300,
             )
             response.raise_for_status()
             return response.json()["response"].strip()
         except requests.exceptions.ConnectionError:
-            raise RuntimeError(
-                "Ollama is not running. Start it with: ollama serve"
-            )
+            raise RuntimeError("Ollama is not running. Start with: ollama serve")
         except Exception as e:
-            raise RuntimeError(f"Ollama error: {e}")
+            raise RuntimeError(f"{self.agent_name} error: {e}")
 
     @property
     def model_name(self) -> str:
-        return self.model
+        return f"{self._model} ({self.agent_name})"

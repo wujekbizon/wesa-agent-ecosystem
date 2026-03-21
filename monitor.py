@@ -1,9 +1,9 @@
 """
-WESA Agent Ecosystem - CLI Monitor
-Live terminal dashboard showing daemon status, task queue, and recent results.
+WESA Agent Ecosystem - CLI Monitor v0.2
+Live terminal dashboard with task details, error reports, and agent activity.
 
 Usage:
-    python monitor.py          # refresh every 3s
+    python monitor.py          # live, refresh every 3s
     python monitor.py --once   # print once and exit
 """
 
@@ -18,11 +18,10 @@ try:
     from rich.console import Console
     from rich.table import Table
     from rich.panel import Panel
-    from rich.columns import Columns
     from rich.text import Text
-    from rich import box
-    from rich.live import Live
     from rich.layout import Layout
+    from rich.live import Live
+    from rich import box
 except ImportError:
     print("Install rich: pip install rich")
     sys.exit(1)
@@ -45,20 +44,136 @@ def load_tasks() -> list[dict]:
     return tasks
 
 
-def load_recent_logs(limit: int = 5) -> list[str]:
-    if not LOGS_DIR.exists():
-        return []
-    reports = sorted(LOGS_DIR.glob("*_report.md"), key=lambda x: x.stat().st_mtime, reverse=True)
-    return [f.name for f in reports[:limit]]
+def read_report(task_id: str) -> str:
+    report_path = LOGS_DIR / f"{task_id}_report.md"
+    if report_path.exists():
+        return report_path.read_text(encoding="utf-8")
+    return ""
 
 
-def status_color(status: str) -> str:
+def status_style(status: str) -> str:
     return {
         "pending": "yellow",
-        "in_progress": "cyan",
+        "in_progress": "bold cyan",
         "done": "green",
-        "failed": "red",
+        "failed": "bold red",
     }.get(status, "white")
+
+
+def truncate(text: str, length: int) -> str:
+    return text[:length] + "..." if len(text) > length else text
+
+
+def build_header() -> Panel:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return Panel(
+        f"[bold cyan]WESA Agent Ecosystem[/bold cyan]  |  [bold]Axel's Monitor v0.2[/bold]  |  [dim]{now}[/dim]",
+        box=box.HORIZONTALS,
+        style="on grey7",
+    )
+
+
+def build_task_table(tasks: list[dict]) -> Panel:
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold white", expand=True)
+    table.add_column("ID", style="dim", width=14)
+    table.add_column("Type", width=10)
+    table.add_column("Status", width=13)
+    table.add_column("Agent / Model", width=28)
+    table.add_column("Completed", width=19)
+
+    for t in tasks[:20]:
+        status = t.get("status", "unknown")
+        completed = t.get("completed_at", "")[:19].replace("T", " ") if t.get("completed_at") else "-"
+        table.add_row(
+            t.get("id", "-"),
+            t.get("type", "-"),
+            Text(status, style=status_style(status)),
+            t.get("model_used", "-") or "-",
+            completed,
+        )
+
+    if not tasks:
+        table.add_row("-", "-", Text("No tasks yet", style="dim"), "-", "-")
+
+    done = sum(1 for t in tasks if t.get("status") == "done")
+    failed = sum(1 for t in tasks if t.get("status") == "failed")
+    pending = sum(1 for t in tasks if t.get("status") == "pending")
+    in_prog = sum(1 for t in tasks if t.get("status") == "in_progress")
+
+    title = (
+        f"[bold]Tasks[/bold]  "
+        f"[green]Done:{done}[/green]  "
+        f"[cyan]Active:{in_prog}[/cyan]  "
+        f"[yellow]Pending:{pending}[/yellow]  "
+        f"[red]Failed:{failed}[/red]"
+    )
+    return Panel(table, title=title, border_style="blue")
+
+
+def build_detail_panel(tasks: list[dict]) -> Panel:
+    """Shows full detail of active, failed, or most recent task."""
+
+    # Priority: in_progress > failed > most recent done
+    active = next((t for t in tasks if t.get("status") == "in_progress"), None)
+    failed = [t for t in tasks if t.get("status") == "failed"]
+    recent_done = next((t for t in tasks if t.get("status") == "done"), None)
+
+    lines = []
+
+    # --- IN PROGRESS ---
+    if active:
+        lines.append(f"[bold cyan]IN PROGRESS[/bold cyan]  [dim]{active.get('id')}[/dim]")
+        lines.append(f"[dim]Type:[/dim] {active.get('type')}  |  [dim]Started:[/dim] {active.get('created_at','')[:19].replace('T',' ')}")
+        lines.append("")
+        lines.append("[bold]Prompt:[/bold]")
+        lines.append(f"[white]{truncate(active.get('prompt',''), 400)}[/white]")
+        lines.append("")
+        lines.append("[dim italic]Worker is processing... waiting for result.[/dim italic]")
+
+    # --- FAILED TASKS ---
+    if failed:
+        if lines:
+            lines.append("")
+            lines.append("─" * 60)
+            lines.append("")
+        lines.append(f"[bold red]FAILED TASKS ({len(failed)})[/bold red]")
+        lines.append("")
+        for t in failed[:3]:
+            lines.append(f"[red]Task:[/red] [bold]{t.get('id')}[/bold]  [{t.get('type')}]")
+            lines.append(f"[dim]Prompt:[/dim] {truncate(t.get('prompt',''), 120)}")
+            lines.append(f"[red]Error:[/red] {truncate(t.get('error','unknown error'), 200)}")
+            completed = t.get("completed_at", "")[:19].replace("T", " ")
+            lines.append(f"[dim]Failed at:[/dim] {completed}")
+            lines.append("")
+
+    # --- MOST RECENT DONE ---
+    if not active and not failed and recent_done:
+        lines.append(f"[bold green]LAST COMPLETED[/bold green]  [dim]{recent_done.get('id')}[/dim]")
+        lines.append(f"[dim]Type:[/dim] {recent_done.get('type')}  |  [dim]Model:[/dim] {recent_done.get('model_used','?')}")
+        lines.append(f"[dim]Completed:[/dim] {recent_done.get('completed_at','')[:19].replace('T',' ')}")
+        lines.append("")
+        lines.append("[bold]Prompt:[/bold]")
+        lines.append(f"[dim]{truncate(recent_done.get('prompt',''), 200)}[/dim]")
+        lines.append("")
+        lines.append("[bold]Result:[/bold]")
+        lines.append(f"[white]{truncate(recent_done.get('result',''), 500)}[/white]")
+
+    if not lines:
+        lines.append("[dim]No active tasks. Drop a .json file into tasks/ to start.[/dim]")
+
+    return Panel(
+        "\n".join(lines),
+        title="[bold]Task Detail[/bold]",
+        border_style="blue",
+        padding=(1, 2),
+    )
+
+
+def build_footer() -> Panel:
+    return Panel(
+        "[dim]Ctrl+C to exit  |  Full reports in logs/<task-id>_report.md  |  Refresh: 3s[/dim]",
+        box=box.HORIZONTALS,
+    )
 
 
 def build_dashboard() -> Layout:
@@ -69,60 +184,15 @@ def build_dashboard() -> Layout:
         Layout(name="footer", size=3),
     )
     layout["body"].split_row(
-        Layout(name="tasks"),
-        Layout(name="logs"),
+        Layout(name="tasks", ratio=3),
+        Layout(name="detail", ratio=2),
     )
 
-    # Header
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    layout["header"].update(
-        Panel(f"[bold cyan]WESA Agent Ecosystem Monitor[/bold cyan]   [dim]{now}[/dim]", box=box.HORIZONTALS)
-    )
-
-    # Task queue table
     tasks = load_tasks()
-    task_table = Table(box=box.SIMPLE, show_header=True, header_style="bold white")
-    task_table.add_column("ID", style="dim", width=10)
-    task_table.add_column("Type", width=10)
-    task_table.add_column("Status", width=12)
-    task_table.add_column("Model", width=20)
-    task_table.add_column("Completed", width=20)
-
-    for t in tasks[:15]:
-        status = t.get("status", "unknown")
-        completed = t.get("completed_at", "")[:19].replace("T", " ") if t.get("completed_at") else "-"
-        task_table.add_row(
-            t.get("id", "-"),
-            t.get("type", "-"),
-            Text(status, style=status_color(status)),
-            t.get("model_used", "-") or "-",
-            completed,
-        )
-
-    if not tasks:
-        task_table.add_row("-", "-", Text("No tasks yet", style="dim"), "-", "-")
-
-    layout["tasks"].update(Panel(task_table, title=f"[bold]Task Queue[/bold] ({len(tasks)} tasks)", border_style="blue"))
-
-    # Recent logs
-    logs = load_recent_logs()
-    log_text = "\n".join(f"[green]{l}[/green]" for l in logs) if logs else "[dim]No reports yet[/dim]"
-    layout["logs"].update(Panel(log_text, title="[bold]Recent Reports[/bold]", border_style="blue"))
-
-    # Footer stats
-    done = sum(1 for t in tasks if t.get("status") == "done")
-    failed = sum(1 for t in tasks if t.get("status") == "failed")
-    pending = sum(1 for t in tasks if t.get("status") == "pending")
-    in_progress = sum(1 for t in tasks if t.get("status") == "in_progress")
-
-    stats = (
-        f"[green]Done: {done}[/green]  "
-        f"[cyan]In Progress: {in_progress}[/cyan]  "
-        f"[yellow]Pending: {pending}[/yellow]  "
-        f"[red]Failed: {failed}[/red]  "
-        f"  [dim]Refresh: {REFRESH_SECONDS}s | Ctrl+C to exit[/dim]"
-    )
-    layout["footer"].update(Panel(stats, box=box.HORIZONTALS))
+    layout["header"].update(build_header())
+    layout["tasks"].update(build_task_table(tasks))
+    layout["detail"].update(build_detail_panel(tasks))
+    layout["footer"].update(build_footer())
 
     return layout
 
