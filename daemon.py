@@ -23,6 +23,7 @@ import signal
 import time
 import sys
 import json
+import uuid
 from pathlib import Path
 from datetime import datetime
 
@@ -46,7 +47,8 @@ POLL_INTERVAL = 3
 TASK_TYPE_LOG_DIR = {
     "design":   LOGS_DESIGNS_DIR,
     "frontend": LOGS_DESIGNS_DIR,
-    "review":   LOGS_DESIGNS_DIR,
+    "review":       LOGS_DESIGNS_DIR,
+    "skill_update": LOGS_DESIGNS_DIR,
     "research": LOGS_RESEARCH_DIR,
     "analyze":  LOGS_RESEARCH_DIR,
     "code":     LOGS_DEV_DIR,
@@ -188,6 +190,32 @@ def strip_code_fences(text: str) -> str:
     return text.strip()
 
 
+def queue_axel_skill_update(review_task: Task, queue: TaskQueue):
+    """After a Q1 review completes, queue Axel to update ux_agent.yaml."""
+    try:
+        review_content = review_task.result or ""
+        skill_path = WORKSPACE_ROOT / "WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml"
+        current_skill = skill_path.read_text(encoding="utf-8") if skill_path.exists() else ""
+
+        su1_id = f"su1-skill-{uuid.uuid4().hex[:6]}"
+        su1_task = Task(
+            id=su1_id,
+            type="skill_update",
+            prompt=(
+                f"A Q1 design review has just completed. Update the UX1 skill based on the findings.\n\n"
+                f"--- Q1 REVIEW ---\n{review_content}\n\n"
+                f"--- CURRENT ux_agent.yaml ---\n{current_skill}"
+            ),
+            output_file="WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml",
+        )
+        task_path = TASKS_DIR / f"{su1_id}.json"
+        su1_task.save(task_path)
+        queue.import_task(json.loads(su1_task.to_json()))
+        log(f"SU1 skill-update task queued: {su1_id}")
+    except Exception as e:
+        log(f"Failed to queue Axel skill update: {e}")
+
+
 def process_task(task_path: Path, router: Router, queue: TaskQueue):
     task = Task.from_file(task_path)
 
@@ -219,6 +247,10 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue):
         update_briefing(queue)
         log(f"Task {task.id} DONE via {model_used}")
         notify_done(task.id, task.type, model_used)
+
+        # Post-completion hook: after a Q1 review, queue Axel to update UX1 skill
+        if str(task.type).replace("TaskType.", "") == "review" and task.output_file:
+            queue_axel_skill_update(task, queue)
 
     except Exception as e:
         task.error = str(e)

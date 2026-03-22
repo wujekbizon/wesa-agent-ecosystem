@@ -23,6 +23,7 @@ class TaskType(str, Enum):
     TEST = "test"          # → Gemini (T1 - Playwright, testing)
     REVIEW = "review"      # → Gemini (Q1 - QA, code review)
     ASSETS = "assets"      # → Gemini (A1 - image gen via Nano Banana)
+    SKILL_UPDATE = "skill_update"  # → Gemini (SU1 - updates agent skills after Q1 review)
 
 
 class TaskStatus(str, Enum):

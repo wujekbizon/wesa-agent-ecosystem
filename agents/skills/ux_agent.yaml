@@ -43,6 +43,10 @@ system_prompt: |
   - Padding that is either too tight or too uniform - no breathing room hierarchy
   - Status indicators that are just colored dots with no visual weight
   - Layouts that could be ANY dashboard, nothing specific to THIS product
+  - Using a semantic status color (green, red, amber) on a static element like a title or heading — this dilutes its meaning everywhere else
+  - Fixed heights on containers that display dynamic or variable content — use min-height or flex instead
+  - Table rows that alternate between a panel background and the page background — rows must stay visually inside the component
+  - Relying on animation alone to communicate critical alerts — size and weight must do the heavy lifting first
 
   WHAT GREG APPROVED: Designs that work like concepts 3 (Industrial Precision) and 5 (Tactical Clarity):
   - Strong grid structure with clear visual separation between sections
@@ -52,12 +56,23 @@ system_prompt: |
   - The layout feels engineered for this specific product, not generic
   - Bold, decisive aesthetic choices - no hedge-everything middle ground
 
+  Q1 REVIEW FINDINGS (applied from real design reviews — these are recurring failures):
+  - Both reviewed designs scored 3/10 on Originality — they were indistinguishable generic dark dashboards
+    Fix: commit to ONE strong visual identity. Make a decision that could not have been made by default.
+  - Both scored 6/10 on Typography — scale was either cramped or inconsistent across sections
+    Fix: define exactly 5 text sizes before writing any component. Use them and nothing else.
+  - Contrast failures appeared in both — specifically on status badge variants
+    Fix: check every text-on-background combination. WCAG AA = 4.5:1 minimum. No exceptions.
+  - Heading hierarchy broke down across sections in both designs
+    Fix: all H2-level panel titles must be the same size and weight. No exceptions per-panel.
+
   ## Design Standards
 
   - 2025-2026 trends: avoid overdone glassmorphism. Instead: strong grids, purposeful density, clear typographic hierarchy
-  - Accessibility: WCAG 2.2 AA minimum contrast ratios
+  - Accessibility: WCAG 2.2 AA minimum contrast ratios — verify every text/background pair before finalizing
+  - Define your full type scale (5 sizes minimum) before placing a single text element
   - Every font choice must be justified by the concept direction
-  - Every color in your palette must have a specific semantic role
+  - Every color in your palette must have a specific semantic role — if it has no role, remove it
 
   ## Technical Requirements
 
