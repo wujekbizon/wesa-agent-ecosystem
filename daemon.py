@@ -1,5 +1,5 @@
 """
-WESA Agent Ecosystem - Agent Daemon v0.4
+WESA Agent Ecosystem - Agent Daemon v0.5
 Run this once and leave it running. It watches the tasks/ folder
 and processes any new task files automatically.
 
@@ -10,12 +10,16 @@ To submit a task: drop a .json file into the tasks/ folder.
 Results appear in logs/ with matching task ID.
 Axel's briefing is updated at: logs/AXEL_BRIEFING.md
 
-output_file support:
-    Add "output_file": "src/myfile.py" to any task JSON.
-    On completion, daemon strips markdown fences and writes result
-    directly to that path. Axel reviews - does not deploy manually.
+Changes in v0.5:
+- SQLite queue integrated: all task state is backed by logs/tasks.db
+- sync_json_to_db() imports JSON tasks into SQLite on every loop
+- update_briefing() now reads from SQLite (reliable, no JSON file scanning)
+- output_file paths resolved relative to workspace root (not daemon cwd)
+- Removed dead write_output_file() function
 """
 
+import os
+import signal
 import time
 import sys
 import json
@@ -27,11 +31,17 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.task import Task, TaskStatus
 from src.router import Router
 from src.notifier import notify_done, notify_failed, notify_started
+from src.task_queue import TaskQueue
 
+# Directories (relative to cwd - run daemon from agent-ecosystem/)
 TASKS_DIR = Path("tasks")
 LOGS_DIR = Path("logs")
 BRIEFING_FILE = LOGS_DIR / "AXEL_BRIEFING.md"
 POLL_INTERVAL = 3
+
+# Workspace root: three levels up from daemon.py = Coworker/
+# Used to resolve output_file paths correctly regardless of cwd
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def setup_dirs():
@@ -39,19 +49,34 @@ def setup_dirs():
     LOGS_DIR.mkdir(exist_ok=True)
 
 
+def write_pid():
+    (LOGS_DIR / "daemon.pid").write_text(str(os.getpid()))
+
+
+def _handle_sigterm(sig, frame):
+    log("SIGTERM received. Daemon stopping cleanly.")
+    sys.exit(0)
+
+
 def log(msg: str):
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"[{timestamp}] {msg}")
 
 
-def update_briefing():
-    """Rebuild Axel's briefing file from all task files. Called after every task completes."""
-    tasks = []
-    for f in sorted(TASKS_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+def sync_json_to_db(queue: TaskQueue):
+    """Import any JSON task files not yet tracked in SQLite."""
+    for f in TASKS_DIR.glob("*.json"):
         try:
-            tasks.append(json.loads(f.read_text(encoding="utf-8")))
-        except Exception:
-            pass
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if data.get("id"):
+                queue.import_task(data)
+        except Exception as e:
+            log(f"sync_json_to_db: failed on {f.name}: {e}")
+
+
+def update_briefing(queue: TaskQueue):
+    """Rebuild Axel's briefing file from SQLite. Called after every task completes."""
+    tasks = queue.get_all()
 
     done = [t for t in tasks if t.get("status") == "done"]
     failed = [t for t in tasks if t.get("status") == "failed"]
@@ -61,7 +86,7 @@ def update_briefing():
     lines = [
         "# Axel Briefing",
         f"**Last updated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"**Read this at the start of every Cowork session to restore context.**",
+        "**Read this at the start of every Cowork session to restore context.**",
         "",
         "---",
         "",
@@ -76,7 +101,7 @@ def update_briefing():
     if failed:
         lines += ["## Needs Attention (Failed Tasks)", ""]
         for t in failed:
-            lines.append(f"- **{t['id']}** [{t['type']}] — {t.get('error', 'unknown error')[:120]}")
+            lines.append(f"- **{t['id']}** [{t['type']}] — {(t.get('error') or 'unknown error')[:120]}")
         lines.append("")
 
     if pending:
@@ -88,8 +113,8 @@ def update_briefing():
     if done:
         lines += ["## Recently Completed", ""]
         for t in done[:10]:
-            completed = t.get("completed_at", "")[:19].replace("T", " ")
-            lines.append(f"- **{t['id']}** [{t['type']}] via {t.get('model_used', '?')} at {completed}")
+            completed = (t.get("completed_at") or "")[:19].replace("T", " ")
+            lines.append(f"- **{t['id']}** [{t['type']}] via {t.get('model') or '?'} at {completed}")
         lines.append("")
 
     lines += [
@@ -134,22 +159,7 @@ def strip_code_fences(text: str) -> str:
     return "\n".join(lines)
 
 
-def write_output_file(task: Task):
-    """If task specifies output_file, write the result directly to that path."""
-    raw = getattr(task, 'output_file', None)
-    if not raw:
-        # also check task JSON directly for output_file
-        return
-    output_path = Path(raw)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(strip_code_fences(task.result), encoding="utf-8")
-    log(f"Output written to {output_path}")
-
-
-def process_task(task_path: Path, router: Router):
-    data = json.loads(task_path.read_text(encoding="utf-8"))
-    output_file = data.get("output_file")
-
+def process_task(task_path: Path, router: Router, queue: TaskQueue):
     task = Task.from_file(task_path)
 
     if task.status != TaskStatus.PENDING:
@@ -158,6 +168,7 @@ def process_task(task_path: Path, router: Router):
     log(f"Processing task {task.id} [{task.type}] ...")
     task.status = TaskStatus.IN_PROGRESS
     task.save(task_path)
+    queue.update_status(task.id, "in_progress")
 
     try:
         result, model_used = router.run(task)
@@ -166,22 +177,28 @@ def process_task(task_path: Path, router: Router):
         task.status = TaskStatus.DONE
         task.completed_at = datetime.now().isoformat()
         task.save(task_path)
+        queue.update_status(task.id, "done", result=result, model_used=model_used)
+
         write_report(task)
-        if output_file:
-            output_path = Path(output_file)
+
+        if task.output_file:
+            output_path = WORKSPACE_ROOT / task.output_file
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(strip_code_fences(result), encoding="utf-8")
             log(f"Output written to {output_path}")
-        update_briefing()
+
+        update_briefing(queue)
         log(f"Task {task.id} DONE via {model_used}")
         notify_done(task.id, task.type, model_used)
+
     except Exception as e:
         task.error = str(e)
         task.status = TaskStatus.FAILED
         task.completed_at = datetime.now().isoformat()
         task.save(task_path)
+        queue.update_status(task.id, "failed", error=str(e))
         write_report(task)
-        update_briefing()
+        update_briefing(queue)
         log(f"Task {task.id} FAILED: {e}")
         notify_failed(task.id, str(e))
 
@@ -189,20 +206,28 @@ def process_task(task_path: Path, router: Router):
 def run():
     setup_dirs()
     router = Router()
+    queue = TaskQueue(db_path=str(LOGS_DIR / "tasks.db"))
 
-    log("=== WESA Agent Daemon v0.4 STARTED ===")
-    log(f"Watching:  {TASKS_DIR.resolve()}")
-    log(f"Reports:   {LOGS_DIR.resolve()}")
-    log(f"Briefing:  {BRIEFING_FILE.resolve()}")
+    log("=== WESA Agent Daemon v0.5 STARTED ===")
+    log(f"Watching:       {TASKS_DIR.resolve()}")
+    log(f"Reports:        {LOGS_DIR.resolve()}")
+    log(f"SQLite DB:      {(LOGS_DIR / 'tasks.db').resolve()}")
+    log(f"Briefing:       {BRIEFING_FILE.resolve()}")
+    log(f"Workspace root: {WORKSPACE_ROOT}")
     log(f"Polling every {POLL_INTERVAL}s. Press Ctrl+C to stop.\n")
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+    write_pid()
     notify_started()
-    update_briefing()
+    sync_json_to_db(queue)
+    update_briefing(queue)
 
     while True:
         try:
+            sync_json_to_db(queue)
             for task_file in sorted(TASKS_DIR.glob("*.json")):
                 try:
-                    process_task(task_file, router)
+                    process_task(task_file, router, queue)
                 except Exception as e:
                     log(f"Unhandled error on {task_file.name}: {e}")
             time.sleep(POLL_INTERVAL)

@@ -38,6 +38,7 @@ class Task:
     result: str = ""
     error: str = ""
     model_used: str = ""
+    output_file: str = ""
 
     def __post_init__(self):
         if not self.id:

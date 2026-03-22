@@ -112,15 +112,64 @@ class TaskQueue:
         finally:
             conn.close()
 
-    def update_status(self, task_id: str, status: str, result: str = '', error: str = '') -> None:
+    def has_task(self, task_id: str) -> bool:
+        """Returns True if a task with this ID already exists in the DB."""
+        conn = self._get_conn()
+        try:
+            row = conn.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    def import_task(self, task_data: dict) -> None:
         """
-        Updates task status and optional result/error.
+        Import an existing task dict into the queue, preserving its ID and status.
+        Used for syncing JSON files into SQLite on startup. Silently skips duplicates.
+        """
+        task_id = task_data.get("id")
+        if not task_id:
+            raise ValueError("task_data must have an 'id' field.")
+        if self.has_task(task_id):
+            return
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """
+                INSERT INTO tasks (id, type, prompt, status, model, output_file, created_at, completed_at, result, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task_id,
+                    task_data.get("type", "general"),
+                    task_data.get("prompt", ""),
+                    task_data.get("status", "pending"),
+                    task_data.get("model_used") or task_data.get("model"),
+                    task_data.get("output_file"),
+                    task_data.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                    task_data.get("completed_at"),
+                    task_data.get("result"),
+                    task_data.get("error"),
+                )
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            pass  # already exists, fine
+        finally:
+            conn.close()
+
+    def update_status(
+        self, task_id: str, status: str,
+        result: str = '', error: str = '', model_used: str = ''
+    ) -> None:
+        """
+        Updates task status and optional result/error/model.
 
         Args:
             task_id: The task's unique ID.
             status: New status value.
             result: Output string on success.
             error: Error string on failure.
+            model_used: Model that processed the task (stored in 'model' column).
         """
         if status not in VALID_STATUSES:
             raise ValueError(f"Invalid status '{status}'. Must be one of {VALID_STATUSES}")
@@ -130,8 +179,13 @@ class TaskQueue:
         conn = self._get_conn()
         try:
             cursor = conn.execute(
-                "UPDATE tasks SET status = ?, result = ?, error = ?, completed_at = ? WHERE id = ?",
-                (status, result, error, completed_at, task_id)
+                """
+                UPDATE tasks
+                SET status = ?, result = ?, error = ?, completed_at = ?,
+                    model = COALESCE(NULLIF(?, ''), model)
+                WHERE id = ?
+                """,
+                (status, result, error, completed_at, model_used, task_id)
             )
             if cursor.rowcount == 0:
                 raise ValueError(f"Task '{task_id}' not found.")

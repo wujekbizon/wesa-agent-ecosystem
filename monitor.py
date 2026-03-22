@@ -1,10 +1,11 @@
 """
-WESA Agent Ecosystem - CLI Monitor v0.2
-Live terminal dashboard with task details, error reports, and agent activity.
+WESA Agent Ecosystem - CLI Monitor v0.3
+Live terminal dashboard with task details, error reports, and agent activity log.
 
 Usage:
     python monitor.py          # live, refresh every 3s
     python monitor.py --once   # print once and exit
+    python monitor.py --log    # full scrollable AXEL_LOG view
 """
 
 import sys
@@ -169,9 +170,48 @@ def build_detail_panel(tasks: list[dict]) -> Panel:
     )
 
 
+def build_axel_log_panel(max_lines: int = 20) -> Panel:
+    """Shows the last N lines of AXEL_LOG.md."""
+    log_path = LOGS_DIR / "AXEL_LOG.md"
+    if not log_path.exists():
+        return Panel("[dim]No AXEL_LOG.md yet.[/dim]", title="[bold]Axel Log[/bold]", border_style="magenta")
+
+    raw = log_path.read_text(encoding="utf-8")
+    # Filter to only table rows (lines starting with |)
+    lines = [l for l in raw.splitlines() if l.strip().startswith("|") and "---" not in l and "Time" not in l]
+    recent = lines[-max_lines:]
+
+    content_lines = []
+    for line in recent:
+        parts = [p.strip() for p in line.strip().strip("|").split("|")]
+        if len(parts) >= 3:
+            time_str, action, detail = parts[0], parts[1], " | ".join(parts[2:])
+            action_style = {
+                "TASK COMPLETE": "green",
+                "TASK QUEUED": "cyan",
+                "DEPLOYED": "bold green",
+                "WORKER FLAG": "yellow",
+                "ESCALATE": "bold red",
+                "SYSTEM UPDATE": "bold blue",
+                "SCHEDULE": "dim",
+                "ALL CLEAR": "dim green",
+            }.get(action, "white")
+            content_lines.append(f"[dim]{time_str}[/dim] [{action_style}]{action}[/{action_style}] [dim]{truncate(detail, 55)}[/dim]")
+
+    if not content_lines:
+        content_lines.append("[dim]No log entries yet.[/dim]")
+
+    return Panel(
+        "\n".join(content_lines),
+        title=f"[bold magenta]Axel Log[/bold magenta] [dim](last {max_lines})[/dim]",
+        border_style="magenta",
+        padding=(0, 1),
+    )
+
+
 def build_footer() -> Panel:
     return Panel(
-        "[dim]Ctrl+C to exit  |  Full reports in logs/<task-id>_report.md  |  Refresh: 3s[/dim]",
+        "[dim]Ctrl+C to exit  |  logs/<task-id>_report.md  |  --log for full Axel log  |  Refresh: 3s[/dim]",
         box=box.HORIZONTALS,
     )
 
@@ -180,18 +220,21 @@ def build_dashboard() -> Layout:
     layout = Layout()
     layout.split_column(
         Layout(name="header", size=3),
-        Layout(name="body"),
+        Layout(name="top", ratio=2),
+        Layout(name="bottom", ratio=3),
         Layout(name="footer", size=3),
     )
-    layout["body"].split_row(
-        Layout(name="tasks", ratio=3),
-        Layout(name="detail", ratio=2),
+    layout["top"].update(build_task_table(load_tasks()))
+    layout["bottom"].split_row(
+        Layout(name="detail", ratio=3),
+        Layout(name="axel_log", ratio=2),
     )
 
     tasks = load_tasks()
     layout["header"].update(build_header())
-    layout["tasks"].update(build_task_table(tasks))
-    layout["detail"].update(build_detail_panel(tasks))
+    layout["top"].update(build_task_table(tasks))
+    layout["bottom"]["detail"].update(build_detail_panel(tasks))
+    layout["bottom"]["axel_log"].update(build_axel_log_panel())
     layout["footer"].update(build_footer())
 
     return layout
@@ -212,12 +255,25 @@ def run_live():
     console.print("[dim]Monitor stopped.[/dim]")
 
 
+def run_log():
+    """Full scrollable AXEL_LOG view using Rich pager."""
+    log_path = LOGS_DIR / "AXEL_LOG.md"
+    if not log_path.exists():
+        console.print("[red]AXEL_LOG.md not found.[/red]")
+        return
+    with console.pager():
+        console.print(log_path.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WESA Agent Ecosystem Monitor")
     parser.add_argument("--once", action="store_true", help="Print once and exit")
+    parser.add_argument("--log", action="store_true", help="Full scrollable Axel log view")
     args = parser.parse_args()
 
-    if args.once:
+    if args.log:
+        run_log()
+    elif args.once:
         run_once()
     else:
         run_live()
