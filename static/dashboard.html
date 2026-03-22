@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WESA Agent Ecosystem Dashboard</title>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+    <style>
+        /* CSS Variables */
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --border: #30363d;
+            --text: #e6edf3;
+            --muted: #8b949e;
+
+            --pending: #d29922;
+            --in-progress: #58a6ff;
+            --done: #3fb950;
+            --failed: #f85149;
+            --selected-bg: #1f2937;
+            --toast-bg: #21262d;
+            --toast-success: #3fb950;
+            --toast-error: #f85149;
+            --toast-warning: #d29922;
+        }
+
+        /* Base Styles */
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden; /* Prevent scroll on body */
+        }
+
+        #root {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        /* Top Bar */
+        .top-bar {
+            height: 56px;
+            background-color: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            justify-content: space-between;
+            flex-shrink: 0; /* Prevent shrinking */
+        }
+
+        .top-bar-left, .top-bar-center, .top-bar-right {
+            display: flex;
+            align-items: center;
+        }
+
+        .top-bar-left span:first-child {
+            font-weight: bold;
+            margin-right: 8px;
+        }
+
+        .top-bar-left span:last-child {
+            color: var(--muted);
+        }
+
+        .status-pill {
+            background-color: var(--border); /* Neutral background for pills */
+            color: var(--text);
+            padding: 4px 10px;
+            border-radius: 16px;
+            font-size: 0.85em;
+            margin: 0 5px;
+            display: flex;
+            align-items: center;
+            white-space: nowrap;
+        }
+        .status-pill::before {
+            content: '';
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .status-pill.pending::before { background-color: var(--pending); }
+        .status-pill.in-progress::before { background-color: var(--in-progress); }
+        .status-pill.done::before { background-color: var(--done); }
+        .status-pill.failed::before { background-color: var(--failed); }
+
+        .daemon-status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .daemon-status-dot.green { background-color: var(--done); }
+        .daemon-status-dot.red { background-color: var(--failed); }
+
+        .daemon-pid {
+            color: var(--muted);
+            margin-right: 15px;
+        }
+
+        button {
+            background-color: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border);
+            padding: 8px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+        button:hover {
+            background-color: var(--border);
+        }
+        button:active {
+            background-color: var(--surface);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .button.red {
+            background-color: var(--failed);
+            border-color: var(--failed);
+        }
+        .button.red:hover {
+            background-color: #e0443e; /* slightly darker red */
+            border-color: #e0443e;
+        }
+
+
+        /* Main Content Area */
+        .main-content {
+            display: flex;
+            flex-grow: 1; /* Fills remaining height */
+            overflow: hidden; /* Important for child scroll areas */
+        }
+
+        /* Left Panel (Task List) */
+        .task-list-panel {
+            width: 320px;
+            background-color: var(--surface);
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+            flex-shrink: 0; /* Prevent shrinking */
+        }
+
+        .task-list-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background-color 0.15s;
+            position: relative; /* For the border-left */
+        }
+
+        .task-list-item:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .task-list-item.selected {
+            background-color: var(--selected-bg);
+        }
+
+        .task-list-item::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background-color: transparent; /* Default */
+        }
+
+        .task-list-item.status-pending::before { background-color: var(--pending); }
+        .task-list-item.status-in_progress::before { background-color: var(--in-progress); }
+        .task-list-item.status-done::before { background-color: var(--done); }
+        .task-list-item.status-failed::before { background-color: var(--failed); }
+
+        .task-item-content {
+            margin-left: 10px; /* Space for the border */
+            flex-grow: 1;
+        }
+
+        .task-item-id {
+            font-weight: bold;
+            font-size: 0.95em;
+        }
+
+        .task-item-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8em;
+            color: var(--muted);
+            margin-top: 4px;
+        }
+
+        .task-item-type {
+            background-color: var(--border);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            margin-right: 8px;
+            display: inline-block;
+        }
+
+        .task-item-status {
+            font-weight: bold;
+            text-transform: capitalize;
+            margin-right: 8px;
+        }
+
+        .task-item-status.pending { color: var(--pending); }
+        .task-item-status.in_progress { color: var(--in-progress); }
+        .task-item-status.done { color: var(--done); }
+        .task-item-status.failed { color: var(--failed); }
+
+        /* Right Panel (Task Detail) */
+        .task-detail-panel {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .task-detail-panel h2 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap; /* Allow title to wrap */
+        }
+        .task-detail-panel h2 .task-id-header {
+             font-size: 1.5em;
+        }
+        .task-detail-panel h2 .task-type-tag {
+            background-color: var(--border);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.7em;
+            margin-left: 10px;
+            display: inline-block;
+            white-space: nowrap;
+        }
+        .task-detail-panel h2 .task-status-header {
+            font-size: 0.8em;
+            font-weight: bold;
+            text-transform: capitalize;
+            margin-left: 10px;
+            white-space: nowrap;
+        }
+        .task-detail-panel h2 .task-status-header.pending { color: var(--pending); }
+        .task-detail-panel h2 .task-status-header.in_progress { color: var(--in-progress); }
+        .task-detail-panel h2 .task-status-header.done { color: var(--done); }
+        .task-detail-panel h2 .task-status-header.failed { color: var(--failed); }
+
+
+        .task-meta-line {
+            color: var(--muted);
+            font-size: 0.9em;
+            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .task-detail-section {
+            margin-bottom: 20px;
+        }
+
+        .task-detail-section h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+            color: var(--text);
+        }
+
+        .task-detail-pre {
+            background-color: var(--bg);
+            border: 1px solid var(--border);
+            padding: 12px;
+            border-radius: 6px;
+            max-height: 220px;
+            overflow-y: auto;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap; /* Allows text to wrap */
+            word-break: break-all; /* Breaks long words */
+        }
+
+        .task-detail-pre.error {
+            border-color: var(--failed);
+            color: var(--failed);
+        }
+
+        .no-task-selected {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            color: var(--muted);
+            font-size: 1.2em;
+        }
+
+        .delete-button-container {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        /* Toasts */
+        .toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .toast {
+            background-color: var(--toast-bg);
+            color: var(--text);
+            padding: 12px 18px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            min-width: 250px;
+            max-width: 350px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            opacity: 0;
+            animation: fadein 0.3s forwards;
+        }
+
+        .toast.success { border-left: 5px solid var(--toast-success); }
+        .toast.error { border-left: 5px solid var(--toast-error); }
+        .toast.warning { border-left: 5px solid var(--toast-warning); }
+        .toast.info { border-left: 5px solid var(--muted); }
+
+
+        .toast-message {
+            flex-grow: 1;
+            margin-right: 10px;
+        }
+
+        .toast-close-button {
+            background: none;
+            border: none;
+            color: var(--muted);
+            font-size: 1.2em;
+            cursor: pointer;
+            padding: 0 5px;
+        }
+        .toast-close-button:hover {
+            color: var(--text);
+        }
+
+        @keyframes fadein {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+        const { createRoot } = ReactDOM;
+
+        // --- Helper Functions ---
+        const API_BASE = 'http://localhost:8765/api';
+        const WS_URL = 'ws://localhost:8765/ws';
+
+        async function apiFetch(path, method = 'GET', body = null) {
+            const options = { method };
+            if (body) {
+                options.headers = { 'Content-Type': 'application/json' };
+                options.body = JSON.stringify(body);
+            }
+            const response = await fetch(`${API_BASE}${path}`, options);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+                throw new Error(errorData.message || `API error: ${response.status} ${response.statusText}`);
+            }
+            return response.json();
+        }
+
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '-';
+            const date = new Date(timestamp);
+            return date.toLocaleString();
+        }
+
+        const getStatusClass = (status) => {
+            return status ? status.toLowerCase().replace(/ /g, '_') : '';
+        };
+
+        // --- Toast Component ---
+        let toastIdCounter = 0;
+        const Toast = ({ toasts, onRemoveToast }) => {
+            return (
+                <div className="toast-container">
+                    {toasts.map(toast => (
+                        <div key={toast.id} className={`toast ${toast.type}`}>
+                            <div className="toast-message">{toast.message}</div>
+                            <button className="toast-close-button" onClick={() => onRemoveToast(toast.id)}>
+                                &times;
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        // --- TopBar Component ---
+        const TopBar = ({ tasks, daemonStatus, onRestartDaemon }) => {
+            const counts = tasks.reduce((acc, task) => {
+                if (task.status === 'pending') acc.pending++;
+                else if (task.status === 'in_progress') acc.in_progress++;
+                else if (task.status === 'done') acc.done++;
+                else if (task.status === 'failed') acc.failed++;
+                return acc;
+            }, { pending: 0, in_progress: 0, done: 0, failed: 0 });
+
+            const daemonRunning = daemonStatus.running;
+            const daemonPid = daemonStatus.pid;
+
+            return (
+                <div className="top-bar">
+                    <div className="top-bar-left">
+                        <span>WESA</span>
+                        <span>Agent Ecosystem</span>
+                    </div>
+                    <div className="top-bar-center">
+                        <div className={`status-pill pending`}>PENDING: {counts.pending}</div>
+                        <div className={`status-pill in-progress`}>ACTIVE: {counts.in_progress}</div>
+                        <div className={`status-pill done`}>DONE: {counts.done}</div>
+                        <div className={`status-pill failed`}>FAILED: {counts.failed}</div>
+                    </div>
+                    <div className="top-bar-right">
+                        <div className={`daemon-status-dot ${daemonRunning ? 'green' : 'red'}`}></div>
+                        <span className="daemon-pid">PID: {daemonPid || '-'}</span>
+                        <button onClick={onRestartDaemon}>Restart</button>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- TaskList Component ---
+        const TaskList = ({ tasks, selectedTaskId, onSelectTask }) => {
+            const sortedTasks = [...tasks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            return (
+                <div className="task-list-panel">
+                    {sortedTasks.map(task => (
+                        <div
+                            key={task.id}
+                            className={`task-list-item status-${getStatusClass(task.status)} ${task.id === selectedTaskId ? 'selected' : ''}`}
+                            onClick={() => onSelectTask(task.id)}
+                        >
+                            <div className="task-item-content">
+                                <div className="task-item-id">Task {task.id.substring(0, 8)}</div>
+                                <div className="task-item-meta">
+                                    <span>
+                                        <span className="task-item-type">{task.type}</span>
+                                        <span className={`task-item-status ${getStatusClass(task.status)}`}>{task.status.replace(/_/g, ' ')}</span>
+                                    </span>
+                                    <span>{formatTimestamp(task.completed_at || task.created_at)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        // --- TaskDetail Component ---
+        const TaskDetail = ({ detail, onDeleteTask }) => {
+            if (!detail) {
+                return (
+                    <div className="task-detail-panel">
+                        <div className="no-task-selected">No task selected</div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="task-detail-panel">
+                    <h2>
+                        <span className="task-id-header">Task {detail.id.substring(0, 8)}</span>
+                        <span className="task-type-tag">{detail.type}</span>
+                        <span className={`task-status-header ${getStatusClass(detail.status)}`}>{detail.status.replace(/_/g, ' ')}</span>
+                    </h2>
+                    <div className="task-meta-line">
+                        <span>Model: {detail.model || '-'}</span>
+                        <span>Created: {formatTimestamp(detail.created_at)}</span>
+                        <span>Completed: {formatTimestamp(detail.completed_at)}</span>
+                    </div>
+
+                    <div className="task-detail-section">
+                        <h3>Prompt</h3>
+                        <pre className="task-detail-pre">{detail.prompt}</pre>
+                    </div>
+
+                    {detail.result && (
+                        <div className="task-detail-section">
+                            <h3>Result</h3>
+                            <pre className="task-detail-pre">{detail.result}</pre>
+                        </div>
+                    )}
+
+                    {detail.error && (
+                        <div className="task-detail-section">
+                            <h3>Error</h3>
+                            <pre className="task-detail-pre error">{detail.error}</pre>
+                        </div>
+                    )}
+
+                    {detail.report && (
+                        <div className="task-detail-section">
+                            <h3>Report</h3>
+                            <pre className="task-detail-pre">{detail.report}</pre>
+                        </div>
+                    )}
+
+                    <div className="delete-button-container">
+                        <button className="button red" onClick={() => onDeleteTask(detail.id)}>
+                            Delete Task
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- App Component ---
+        const App = () => {
+            const [tasks, setTasks] = useState([]);
+            const [selectedTaskId, setSelectedTaskId] = useState(null);
+            const [selectedTaskDetail, setSelectedTaskDetail] = useState(null);
+            const [daemonStatus, setDaemonStatus] = useState({ running: false, pid: null });
+            const [toasts, setToasts] = useState([]);
+
+            const wsRef = useRef(null);
+            const wsReconnectTimeoutRef = useRef(null);
+
+            const addToast = useCallback((message, type = 'info') => {
+                const id = toastIdCounter++;
+                setToasts(prev => [...prev, { id, message, type }]);
+                setTimeout(() => removeToast(id), 3000); // Auto-dismiss after 3s
+            }, []);
+
+            const removeToast = useCallback((id) => {
+                setToasts(prev => prev.filter(toast => toast.id !== id));
+            }, []);
+
+            const fetchInitialData = useCallback(async () => {
+                try {
+                    const [tasksData, daemonData] = await Promise.all([
+                        apiFetch('/tasks'),
+                        apiFetch('/daemon/status')
+                    ]);
+                    setTasks(tasksData);
+                    setDaemonStatus(daemonData);
+                } catch (error) {
+                    console.error("Failed to fetch initial data:", error);
+                    addToast(`Failed to load initial data: ${error.message}`, 'error');
+                }
+            }, [addToast]);
+
+            const connectWebSocket = useCallback(() => {
+                if (wsReconnectTimeoutRef.current) {
+                    clearTimeout(wsReconnectTimeoutRef.current);
+                    wsReconnectTimeoutRef.current = null;
+                }
+                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                    wsRef.current.close(); // Close existing open connection before creating new
+                }
+
+                wsRef.current = new WebSocket(WS_URL);
+
+                wsRef.current.onopen = () => {
+                    console.log("WebSocket connected.");
+                    addToast('Connected to real-time updates.', 'success');
+                };
+
+                wsRef.current.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (Array.isArray(data)) {
+                        setTasks(data);
+                    } else if (data.daemonStatus) {
+                        setDaemonStatus(data.daemonStatus);
+                    }
+                };
+
+                wsRef.current.onclose = (event) => {
+                    console.warn("WebSocket disconnected:", event);
+                    addToast('WebSocket disconnected. Reconnecting in 5s...', 'warning');
+                    wsReconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000); // Retry after 5s
+                };
+
+                wsRef.current.onerror = (error) => {
+                    console.error("WebSocket error:", error);
+                    // Force close to trigger onclose and retry if not already handled
+                    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+                        wsRef.current.close();
+                    }
+                };
+            }, [addToast]);
+
+
+            // Initial Data Fetch and WebSocket Connection
+            useEffect(() => {
+                fetchInitialData();
+                connectWebSocket();
+
+                return () => {
+                    if (wsRef.current) {
+                        wsRef.current.close();
+                    }
+                    if (wsReconnectTimeoutRef.current) {
+                        clearTimeout(wsReconnectTimeoutRef.current);
+                    }
+                };
+            }, [fetchInitialData, connectWebSocket]);
+
+            // Fetch selected task detail when selectedTaskId changes
+            useEffect(() => {
+                const fetchTaskDetail = async () => {
+                    if (selectedTaskId) {
+                        try {
+                            const detail = await apiFetch(`/tasks/${selectedTaskId}`);
+                            setSelectedTaskDetail(detail);
+                        } catch (error) {
+                            console.error(`Failed to fetch task ${selectedTaskId} detail:`, error);
+                            setSelectedTaskDetail(null); // Clear detail if fetch fails
+                            addToast(`Failed to load task detail: ${error.message}`, 'error');
+                        }
+                    } else {
+                        setSelectedTaskDetail(null);
+                    }
+                };
+                fetchTaskDetail();
+            }, [selectedTaskId, addToast]);
+
+
+            const handleTaskSelect = useCallback((id) => {
+                setSelectedTaskId(id);
+            }, []);
+
+            const handleTaskDelete = useCallback(async (id) => {
+                if (window.confirm(`Are you sure you want to delete task ${id.substring(0, 8)}?`)) {
+                    try {
+                        await apiFetch(`/tasks/${id}`, 'DELETE');
+                        setTasks(prevTasks => prevTasks.filter(task => task.id !== id));
+                        if (selectedTaskId === id) {
+                            setSelectedTaskId(null);
+                            setSelectedTaskDetail(null);
+                        }
+                        addToast(`Task ${id.substring(0, 8)} deleted successfully.`, 'success');
+                    } catch (error) {
+                        console.error(`Failed to delete task ${id}:`, error);
+                        addToast(`Failed to delete task: ${error.message}`, 'error');
+                    }
+                }
+            }, [selectedTaskId, addToast]);
+
+            const handleDaemonRestart = useCallback(async () => {
+                try {
+                    // Optimistically set status to not running, will be updated by WS or explicit fetch
+                    setDaemonStatus(prev => ({ ...prev, running: false, pid: null }));
+                    const result = await apiFetch('/daemon/restart', 'POST');
+                    setDaemonStatus({ running: true, pid: result.pid }); // Update with new PID
+                    addToast('Daemon restarted successfully.', 'success');
+                } catch (error) {
+                    console.error("Failed to restart daemon:", error);
+                    // Re-fetch status if restart failed to get actual state
+                    try {
+                        const status = await apiFetch('/daemon/status');
+                        setDaemonStatus(status);
+                    } catch (statusError) {
+                         console.error("Failed to fetch daemon status after restart failure:", statusError);
+                    }
+                    addToast(`Failed to restart daemon: ${error.message}`, 'error');
+                }
+            }, [addToast]);
+
+            return (
+                <>
+                    <TopBar
+                        tasks={tasks}
+                        daemonStatus={daemonStatus}
+                        onRestartDaemon={handleDaemonRestart}
+                    />
+                    <div className="main-content">
+                        <TaskList
+                            tasks={tasks}
+                            selectedTaskId={selectedTaskId}
+                            onSelectTask={handleTaskSelect}
+                        />
+                        <TaskDetail
+                            detail={selectedTaskDetail}
+                            onDeleteTask={handleTaskDelete}
+                        />
+                    </div>
+                    <Toast toasts={toasts} onRemoveToast={removeToast} />
+                </>
+            );
+        };
+
+        // Mount the App
+        createRoot(document.getElementById('root')).render(<App />);
+
+    </script>
+</body>
+</html>

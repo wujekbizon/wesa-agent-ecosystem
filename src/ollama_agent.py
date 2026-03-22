@@ -16,6 +16,8 @@ Follow best practices. Return only code and brief explanations."""
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:35b")
+_timeout_env = os.getenv("OLLAMA_TIMEOUT", "0")
+OLLAMA_TIMEOUT = None if _timeout_env == "0" else int(_timeout_env)
 
 
 class OllamaAgent:
@@ -36,7 +38,7 @@ class OllamaAgent:
                     "stream": False,
                     "think": False,
                 },
-                timeout=300,
+                timeout=OLLAMA_TIMEOUT,
             )
             response.raise_for_status()
             return response.json()["response"].strip()

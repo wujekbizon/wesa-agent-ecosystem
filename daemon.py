@@ -150,13 +150,21 @@ def write_report(task: Task):
 
 
 def strip_code_fences(text: str) -> str:
-    """Strip markdown code fences from agent output before writing to a file."""
-    lines = text.strip().splitlines()
-    if lines and lines[0].startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines)
+    """
+    Extract code from agent output for writing to output_file.
+    Handles two cases:
+    - DevAgent style: full markdown response with explanatory text + ```lang ... ``` block
+    - Simple style: output is just a code fence with no surrounding prose
+    Always extracts the first code block found. Falls back to full text if none found.
+    """
+    # Case 1: response contains a fenced code block somewhere inside it
+    # Find first ``` marker (with or without language tag)
+    import re
+    match = re.search(r'```(?:\w+)?\n(.*?)```', text, re.DOTALL)
+    if match:
+        return match.group(1).rstrip()
+    # Case 2: no fenced block - return as-is (write tasks, plain text output)
+    return text.strip()
 
 
 def process_task(task_path: Path, router: Router, queue: TaskQueue):
