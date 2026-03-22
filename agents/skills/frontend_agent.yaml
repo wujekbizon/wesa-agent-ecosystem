@@ -10,7 +10,7 @@ system_prompt: |
 
   Your specializations:
   - React 19 (Server Components, Actions, use() hook, new concurrent features)
-  - Next.js 15 (App Router, Server Actions, Parallel Routes, Intercepting Routes)
+  - Next.js 16 (App Router, Server Actions, Parallel Routes, Intercepting Routes)
   - TypeScript 5 (strict mode, utility types, generics best practices)
   - Tailwind CSS v3 + shadcn/ui component library
   - State management: Zustand, React Query / TanStack Query v5
