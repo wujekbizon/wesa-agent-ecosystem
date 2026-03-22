@@ -36,8 +36,25 @@ from src.task_queue import TaskQueue
 # Directories (relative to cwd - run daemon from agent-ecosystem/)
 TASKS_DIR = Path("tasks")
 LOGS_DIR = Path("logs")
+LOGS_DESIGNS_DIR = LOGS_DIR / "designs"
+LOGS_RESEARCH_DIR = LOGS_DIR / "research"
+LOGS_DEV_DIR = LOGS_DIR / "dev"
 BRIEFING_FILE = LOGS_DIR / "AXEL_BRIEFING.md"
 POLL_INTERVAL = 3
+
+# Route task type → log subfolder
+TASK_TYPE_LOG_DIR = {
+    "design":   LOGS_DESIGNS_DIR,
+    "frontend": LOGS_DESIGNS_DIR,
+    "review":   LOGS_DESIGNS_DIR,
+    "research": LOGS_RESEARCH_DIR,
+    "analyze":  LOGS_RESEARCH_DIR,
+    "code":     LOGS_DEV_DIR,
+    "write":    LOGS_DEV_DIR,
+    "test":     LOGS_DEV_DIR,
+    "assets":   LOGS_DEV_DIR,
+    "general":  LOGS_DEV_DIR,
+}
 
 # Workspace root: three levels up from daemon.py = Coworker/
 # Used to resolve output_file paths correctly regardless of cwd
@@ -47,6 +64,9 @@ WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 def setup_dirs():
     TASKS_DIR.mkdir(exist_ok=True)
     LOGS_DIR.mkdir(exist_ok=True)
+    LOGS_DESIGNS_DIR.mkdir(exist_ok=True)
+    LOGS_RESEARCH_DIR.mkdir(exist_ok=True)
+    LOGS_DEV_DIR.mkdir(exist_ok=True)
 
 
 def write_pid():
@@ -130,7 +150,8 @@ def update_briefing(queue: TaskQueue):
 
 
 def write_report(task: Task):
-    report_path = LOGS_DIR / f"{task.id}_report.md"
+    log_dir = TASK_TYPE_LOG_DIR.get(str(task.type).replace("TaskType.", ""), LOGS_DEV_DIR)
+    report_path = log_dir / f"{task.id}_report.md"
     report = f"""# Task Report
 **ID**: {task.id}
 **Type**: {task.type}

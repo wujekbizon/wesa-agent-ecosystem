@@ -13,11 +13,16 @@ from pathlib import Path
 
 
 class TaskType(str, Enum):
-    CODE = "code"          # → Ollama (local, private)
-    RESEARCH = "research"  # → Gemini (fast, broad knowledge)
-    WRITE = "write"        # → Gemini
+    CODE = "code"          # → Ollama (D1 - Python, backend, CLI)
+    RESEARCH = "research"  # → Gemini (R1 - web research, analysis)
+    WRITE = "write"        # → Gemini (W1 - docs, content, markdown)
     ANALYZE = "analyze"    # → Gemini
     GENERAL = "general"    # → Gemini
+    DESIGN = "design"      # → Gemini (UX1 - UI/UX prototypes)
+    FRONTEND = "frontend"  # → Gemini (FE1 - React 19, Next.js)
+    TEST = "test"          # → Gemini (T1 - Playwright, testing)
+    REVIEW = "review"      # → Gemini (Q1 - QA, code review)
+    ASSETS = "assets"      # → Gemini (A1 - image gen via Nano Banana)
 
 
 class TaskStatus(str, Enum):

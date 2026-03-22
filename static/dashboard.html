@@ -142,6 +142,110 @@
         }
 
 
+        /* Tab Navigation */
+        .tab-nav {
+            display: flex;
+            background-color: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 0 20px;
+            flex-shrink: 0;
+        }
+        .tab-nav button {
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--muted);
+            padding: 8px 16px;
+            margin-right: 4px;
+            border-radius: 0;
+            font-size: 0.875em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s;
+        }
+        .tab-nav button:hover {
+            background: none;
+            color: var(--text);
+        }
+        .tab-nav button.active {
+            color: var(--in-progress);
+            border-bottom-color: var(--in-progress);
+        }
+
+        /* Designs Panel */
+        .designs-panel {
+            display: flex;
+            flex-grow: 1;
+            overflow: hidden;
+        }
+        .designs-list {
+            width: 220px;
+            flex-shrink: 0;
+            background-color: var(--surface);
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+            padding: 12px 0;
+        }
+        .designs-list-item {
+            padding: 10px 16px;
+            cursor: pointer;
+            font-size: 0.85em;
+            color: var(--muted);
+            border-left: 3px solid transparent;
+            transition: background-color 0.15s, color 0.15s;
+        }
+        .designs-list-item:hover {
+            background-color: var(--border);
+            color: var(--text);
+        }
+        .designs-list-item.selected {
+            background-color: var(--selected-bg);
+            color: var(--text);
+            border-left-color: var(--in-progress);
+        }
+        .designs-list-header {
+            padding: 6px 16px 10px;
+            font-size: 0.75em;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+        .designs-preview {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background-color: var(--bg);
+        }
+        .designs-preview-toolbar {
+            height: 40px;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            border-bottom: 1px solid var(--border);
+            background-color: var(--surface);
+            font-size: 0.8em;
+            color: var(--muted);
+            flex-shrink: 0;
+            gap: 12px;
+        }
+        .designs-preview iframe {
+            flex-grow: 1;
+            width: 100%;
+            border: none;
+            background: #fff;
+        }
+        .designs-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex-grow: 1;
+            color: var(--muted);
+            font-size: 0.9em;
+            gap: 8px;
+        }
+
         /* Main Content Area */
         .main-content {
             display: flex;
@@ -468,10 +572,26 @@
 
         // --- TaskList Component ---
         const TaskList = ({ tasks, selectedTaskId, onSelectTask }) => {
-            const sortedTasks = [...tasks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            const [filterToday, setFilterToday] = React.useState(true);
+            const today = new Date().toDateString();
+            const sorted = [...tasks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            const sortedTasks = filterToday
+                ? sorted.filter(t => new Date(t.created_at).toDateString() === today)
+                : sorted;
 
             return (
                 <div className="task-list-panel">
+                    <div style={{ padding: '6px 12px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.75em', color: 'var(--muted)' }}>
+                            {sortedTasks.length} task{sortedTasks.length !== 1 ? 's' : ''}
+                        </span>
+                        <button
+                            onClick={() => setFilterToday(f => !f)}
+                            style={{ fontSize: '0.72em', padding: '2px 8px', background: filterToday ? 'var(--accent)' : 'var(--border)', color: filterToday ? '#000' : 'var(--text)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                        >
+                            {filterToday ? 'Today' : 'All time'}
+                        </button>
+                    </div>
                     {sortedTasks.map(task => (
                         <div
                             key={task.id}
@@ -704,6 +824,8 @@
                 }
             }, [addToast]);
 
+            const [activeTab, setActiveTab] = React.useState('tasks');
+
             return (
                 <>
                     <TopBar
@@ -711,19 +833,316 @@
                         daemonStatus={daemonStatus}
                         onRestartDaemon={handleDaemonRestart}
                     />
-                    <div className="main-content">
-                        <TaskList
-                            tasks={tasks}
-                            selectedTaskId={selectedTaskId}
-                            onSelectTask={handleTaskSelect}
-                        />
-                        <TaskDetail
-                            detail={selectedTaskDetail}
-                            onDeleteTask={handleTaskDelete}
-                        />
+                    <div className="tab-nav">
+                        <button
+                            className={activeTab === 'tasks' ? 'active' : ''}
+                            onClick={() => setActiveTab('tasks')}
+                        >
+                            Tasks
+                        </button>
+                        <button
+                            className={activeTab === 'designs' ? 'active' : ''}
+                            onClick={() => setActiveTab('designs')}
+                        >
+                            Designs
+                        </button>
+                        <button
+                            className={activeTab === 'reviews' ? 'active' : ''}
+                            onClick={() => setActiveTab('reviews')}
+                        >
+                            Q1 Reviews
+                        </button>
                     </div>
+                    {activeTab === 'tasks' && (
+                        <div className="main-content">
+                            <TaskList
+                                tasks={tasks}
+                                selectedTaskId={selectedTaskId}
+                                onSelectTask={handleTaskSelect}
+                            />
+                            <TaskDetail
+                                detail={selectedTaskDetail}
+                                onDeleteTask={handleTaskDelete}
+                            />
+                        </div>
+                    )}
+                    {activeTab === 'designs' && (
+                        <div className="main-content">
+                            <DesignsPanel addToast={addToast} />
+                        </div>
+                    )}
+                    {activeTab === 'reviews' && (
+                        <div className="main-content">
+                            <ReviewsPanel />
+                        </div>
+                    )}
                     <Toast toasts={toasts} onRemoveToast={removeToast} />
                 </>
+            );
+        };
+
+        // --- DesignsPanel Component ---
+        const DesignsPanel = ({ addToast }) => {
+            const [designs, setDesigns] = React.useState([]);
+            const [selectedDesign, setSelectedDesign] = React.useState(null);
+            const [loading, setLoading] = React.useState(true);
+            const [actionInProgress, setActionInProgress] = React.useState(null); // filename being acted on
+            const [retryFeedback, setRetryFeedback] = React.useState('');
+            const [showRetryInput, setShowRetryInput] = React.useState(null); // filename showing feedback input
+            const hasInitialSelection = React.useRef(false);
+
+            const fetchDesigns = React.useCallback(async () => {
+                try {
+                    const data = await apiFetch('/designs');
+                    setDesigns(data);
+                    // Use a ref to avoid stale closure resetting selection on every poll
+                    if (data.length > 0 && !hasInitialSelection.current) {
+                        hasInitialSelection.current = true;
+                        setSelectedDesign(data[0]);
+                    }
+                } catch (err) {
+                    addToast('Failed to load designs: ' + err.message, 'error');
+                } finally {
+                    setLoading(false);
+                }
+            }, [addToast]);
+
+            React.useEffect(() => {
+                fetchDesigns();
+                const interval = setInterval(fetchDesigns, 5000);
+                return () => clearInterval(interval);
+            }, [fetchDesigns]);
+
+            const handleApprove = React.useCallback(async (design) => {
+                if (!window.confirm(`Approve "${design.name}"?\n\nThis will queue UX1 polish + FE1 plan + Q1 review.\nOther concepts remain available for approval.`)) return;
+                setActionInProgress(design.filename);
+                try {
+                    const result = await apiFetch('/designs/approve', 'POST', { filename: design.filename });
+                    addToast(`Approved "${design.name}". Tasks queued: polish ${result.polish_task}, FE1 ${result.fe1_task}, Q1 ${result.q1_review_task}.`, 'success');
+                    hasInitialSelection.current = false;
+                    await fetchDesigns();
+                } catch (err) {
+                    addToast('Approve failed: ' + err.message, 'error');
+                } finally {
+                    setActionInProgress(null);
+                }
+            }, [addToast, fetchDesigns]);
+
+            const handleRetry = React.useCallback(async (design) => {
+                setActionInProgress(design.filename);
+                setShowRetryInput(null);
+                try {
+                    const result = await apiFetch('/designs/retry', 'POST', { filename: design.filename, feedback: retryFeedback });
+                    addToast(`Retry queued for "${design.name}" → task ${result.retry_task}.`, 'success');
+                    setRetryFeedback('');
+                    // Remove from list optimistically
+                    setDesigns(prev => prev.filter(d => d.filename !== design.filename));
+                    if (selectedDesign && selectedDesign.filename === design.filename) {
+                        setSelectedDesign(null);
+                    }
+                } catch (err) {
+                    addToast('Retry failed: ' + err.message, 'error');
+                } finally {
+                    setActionInProgress(null);
+                }
+            }, [addToast, retryFeedback, selectedDesign]);
+
+            const handleDelete = React.useCallback(async (design) => {
+                if (!window.confirm(`Dismiss "${design.name}"? File will be deleted.`)) return;
+                try {
+                    await apiFetch('/designs/delete', 'POST', { filename: design.filename });
+                    setDesigns(prev => prev.filter(d => d.filename !== design.filename));
+                    if (selectedDesign && selectedDesign.filename === design.filename) setSelectedDesign(null);
+                    addToast(`Dismissed "${design.name}".`, 'info');
+                } catch (err) {
+                    addToast('Delete failed: ' + err.message, 'error');
+                }
+            }, [addToast, selectedDesign]);
+
+            if (loading) {
+                return <div className="designs-empty"><span>Loading designs...</span></div>;
+            }
+
+            // Per-file state helpers (based on filename prefix)
+            const isConcept  = f => f.filename.startsWith('concept-');
+            const isApproved = f => f.filename.startsWith('approved-');
+            const isPolished = f => f.filename.startsWith('polished-');
+            const conceptCount = designs.filter(isConcept).length;
+
+            return (
+                <div className="designs-panel">
+                    <div className="designs-list">
+                        <div className="designs-list-header">
+                            {`Designs (${designs.length})`}
+                        </div>
+                        {designs.length === 0 && (
+                            <div style={{ padding: '12px 16px', fontSize: '0.8em', color: 'var(--muted)' }}>
+                                No designs yet.
+                            </div>
+                        )}
+                        {designs.map(d => (
+                            <div key={d.filename}>
+                                <div
+                                    className={`designs-list-item ${selectedDesign && selectedDesign.filename === d.filename ? 'selected' : ''}`}
+                                    onClick={() => setSelectedDesign(d)}
+                                >
+                                    {isApproved(d) ? '✓ ' : isPolished(d) ? '★ ' : ''}{d.name}
+                                </div>
+                                {isConcept(d) && (
+                                    <div style={{ display: 'flex', gap: '6px', padding: '0 12px 8px', flexDirection: 'column' }}>
+                                        <div style={{ display: 'flex', gap: '6px' }}>
+                                            <button
+                                                onClick={() => handleApprove(d)}
+                                                disabled={actionInProgress === d.filename}
+                                                style={{ flex: 1, fontSize: '0.72em', padding: '4px 6px', background: 'var(--done)', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer', opacity: actionInProgress === d.filename ? 0.5 : 1 }}
+                                            >
+                                                {actionInProgress === d.filename ? '...' : 'Approve'}
+                                            </button>
+                                            <button
+                                                onClick={() => setShowRetryInput(showRetryInput === d.filename ? null : d.filename)}
+                                                disabled={actionInProgress === d.filename}
+                                                style={{ flex: 1, fontSize: '0.72em', padding: '4px 6px', background: 'var(--failed)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', opacity: actionInProgress === d.filename ? 0.5 : 1 }}
+                                            >
+                                                Retry
+                                            </button>
+                                            <button
+                                                onClick={() => handleDelete(d)}
+                                                disabled={actionInProgress === d.filename}
+                                                style={{ fontSize: '0.72em', padding: '4px 6px', background: 'var(--border)', color: 'var(--muted)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                        {showRetryInput === d.filename && (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                <textarea
+                                                    placeholder="Feedback for retry (optional)..."
+                                                    value={retryFeedback}
+                                                    onChange={e => setRetryFeedback(e.target.value)}
+                                                    rows={2}
+                                                    style={{ fontSize: '0.72em', padding: '4px', background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '4px', resize: 'none' }}
+                                                />
+                                                <button
+                                                    onClick={() => handleRetry(d)}
+                                                    style={{ fontSize: '0.72em', padding: '4px 6px', background: 'var(--border)', color: 'var(--text)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                                >
+                                                    Send Retry
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                {isApproved(d) && (
+                                    <div style={{ padding: '0 12px 8px', fontSize: '0.72em', color: 'var(--done)' }}>
+                                        Approved — polish + FE1 + Q1 queued
+                                    </div>
+                                )}
+                                {isPolished(d) && (
+                                    <div style={{ padding: '0 12px 8px', fontSize: '0.72em', color: 'var(--muted)' }}>
+                                        Polished
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', marginTop: '4px' }}>
+                            <button onClick={fetchDesigns} style={{ width: '100%', fontSize: '0.8em' }}>Refresh</button>
+                        </div>
+                    </div>
+                    <div className="designs-preview">
+                        {selectedDesign ? (
+                            <>
+                                <div className="designs-preview-toolbar">
+                                    <span style={{ color: 'var(--text)', fontWeight: 500 }}>{selectedDesign.name}</span>
+                                    {isApproved(selectedDesign) && <span style={{ color: 'var(--done)', fontSize: '0.8em' }}>Approved — polish + FE1 + Q1 queued</span>}
+                                    {isPolished(selectedDesign) && <span style={{ color: 'var(--muted)', fontSize: '0.8em' }}>Polished</span>}
+                                    <a
+                                        href={selectedDesign.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        style={{ marginLeft: 'auto', color: 'var(--in-progress)', textDecoration: 'none', fontSize: '0.85em' }}
+                                    >
+                                        Open in new tab →
+                                    </a>
+                                </div>
+                                <iframe
+                                    key={selectedDesign.filename}
+                                    src={selectedDesign.url}
+                                    title={selectedDesign.name}
+                                />
+                            </>
+                        ) : (
+                            <div className="designs-empty">
+                                <span>Select a concept to preview</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- ReviewsPanel Component ---
+        const ReviewsPanel = () => {
+            const [reviews, setReviews] = React.useState([]);
+            const [selected, setSelected] = React.useState(null);
+            const [content, setContent] = React.useState('');
+            const [loading, setLoading] = React.useState(true);
+
+            React.useEffect(() => {
+                apiFetch('/reviews').then(data => {
+                    setReviews(data);
+                    setLoading(false);
+                }).catch(() => setLoading(false));
+            }, []);
+
+            const selectReview = async (review) => {
+                setSelected(review);
+                setContent('Loading...');
+                try {
+                    const data = await apiFetch(`/reviews/${review.filename}`);
+                    setContent(data.content);
+                } catch (e) {
+                    setContent('Failed to load review.');
+                }
+            };
+
+            if (loading) return <div style={{ padding: '24px', color: 'var(--muted)' }}>Loading reviews...</div>;
+
+            return (
+                <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+                    <div style={{ width: '240px', borderRight: '1px solid var(--border)', overflowY: 'auto', flexShrink: 0 }}>
+                        <div style={{ padding: '10px 12px', fontSize: '0.75em', color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+                            Q1 Reviews ({reviews.length})
+                        </div>
+                        {reviews.length === 0 && (
+                            <div style={{ padding: '16px 12px', fontSize: '0.8em', color: 'var(--muted)' }}>No reviews yet.</div>
+                        )}
+                        {reviews.map(r => (
+                            <div
+                                key={r.filename}
+                                onClick={() => selectReview(r)}
+                                style={{
+                                    padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)',
+                                    background: selected && selected.filename === r.filename ? 'var(--hover)' : 'transparent',
+                                    fontSize: '0.8em'
+                                }}
+                            >
+                                <div style={{ color: r.type === 'rejection' ? 'var(--failed)' : 'var(--done)', fontWeight: 600, marginBottom: '2px' }}>
+                                    {r.type === 'rejection' ? '✕ Rejected' : '✓ Approved'}
+                                </div>
+                                <div style={{ color: 'var(--text)', wordBreak: 'break-all' }}>{r.concept}</div>
+                            </div>
+                        ))}
+                    </div>
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+                        {content ? (
+                            <pre style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78em', color: 'var(--text)', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                {content}
+                            </pre>
+                        ) : (
+                            <div style={{ color: 'var(--muted)', fontSize: '0.85em' }}>Select a review to read it.</div>
+                        )}
+                    </div>
+                </div>
             );
         };
 
