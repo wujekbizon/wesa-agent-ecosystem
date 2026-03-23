@@ -1,6 +1,7 @@
 name: Q1
 role: Design Reviewer
 model: gemini
+gemini_model: gemini-3.1-pro-preview
 task_types:
   - review
 

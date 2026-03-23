@@ -65,7 +65,7 @@ class PipelineController:
             "iteration": 1,
             "current_task_id": "",
             "stage_outputs": {},
-            "started_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now().isoformat(),
             "status": "running",
             "topic": topic,
         }
@@ -126,7 +126,7 @@ class PipelineController:
             )
 
         # Evaluate stop condition
-        stop_cond_met = self._eval_stop_if(current_stage.get("stop_if", ""), result)
+        stop_cond_met = self._eval_stop_if(current_stage.get("stop_if", ""), result, state)
 
         loop_to_id: Optional[str] = current_stage.get("loop_to")
         max_iter: int = pipeline_def.get("max_iterations", 10)
@@ -166,11 +166,16 @@ class PipelineController:
         state["current_task_id"] = task_id
         self._save_state(state_file, state)
 
-    def _eval_stop_if(self, stop_if: str, result: str) -> bool:
-        """Evaluates stop_if expression like 'score >= 9' against result text."""
+    def _eval_stop_if(self, stop_if: str, result: str, state: dict = None) -> bool:
+        """Evaluates stop_if expression like 'score >= 72' against result text.
+        If TOTAL SCORE not found in current result, falls back to checking the
+        'review' stage output in state (for use on skill_update stage)."""
         if not stop_if:
             return False
         match = re.search(r"TOTAL SCORE:\s*(\d+)", result)
+        if not match and state:
+            review_output = state.get("stage_outputs", {}).get("review", "")
+            match = re.search(r"TOTAL SCORE:\s*(\d+)", review_output)
         if not match:
             return False
         score = int(match.group(1))
@@ -199,7 +204,13 @@ class PipelineController:
             .replace("{prev_output}", prev_output)
             .replace("{run_id}", state["run_id"])
             .replace("{topic}", state.get("topic", ""))
+            .replace("{iteration}", str(state.get("iteration", 1)))
         )
+        # Substitute {stage.<id>} with outputs from previously completed stages
+        for completed_stage_id, stage_output in state.get("stage_outputs", {}).items():
+            prompt = prompt.replace(f"{{stage.{completed_stage_id}}}", stage_output)
+        # Clear any {stage.*} placeholders for stages not yet run (e.g. {stage.review} on iteration 1)
+        prompt = re.sub(r"\{stage\.[^}]+\}", "", prompt)
 
         # Map stage task_type string to TaskType enum
         type_str = stage.get("task_type", "general")
@@ -211,6 +222,7 @@ class PipelineController:
         output_file = stage.get("output_file", "")
         if output_file:
             output_file = output_file.replace("{run_id}", state["run_id"])
+            output_file = output_file.replace("{iteration}", str(state.get("iteration", 1)))
 
         task = Task(
             prompt=prompt,
@@ -227,7 +239,7 @@ class PipelineController:
                 "prompt": prompt,
                 "output_file": output_file,
                 "status": "pending",
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now().isoformat(),
                 "result": "",
                 "error": "",
                 "model_used": "",
@@ -244,6 +256,6 @@ class PipelineController:
 
     def _mark_done(self, state_file: Path, state: dict) -> None:
         state["status"] = "done"
-        state["ended_at"] = datetime.utcnow().isoformat()
+        state["ended_at"] = datetime.now().isoformat()
         self._save_state(state_file, state)
         print(f"[PipelineController] Pipeline '{state['pipeline']}' run '{state['run_id']}' complete.")

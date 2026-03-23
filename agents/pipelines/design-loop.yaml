@@ -1,60 +1,70 @@
 name: design-loop
-description: "Automated design improvement loop. R1 research → UX1 prototype → Q1 review → SU1 skill update. Loops up to 3 times or stops early when Q1 score reaches 9/10."
+description: "Automated design improvement loop. R1 research (once) → UX1 prototype → Q1 review → SU1 skill update → loops back to UX1 until Q1 scores 72/80 (9/10 avg) or max iterations reached."
 trigger: manual
 stages:
   - id: research
     agent: r1
     task_type: research
     prompt_template: |
-      Research current UI/UX design trends for SaaS agent monitoring dashboards (2025-2026).
-      Focus on: dark theme dashboards, real-time status panels, data density vs readability, sidebar navigation patterns, WebSocket-driven live updates.
-      Reference Grafana, Linear, Vercel dashboard, Datadog as inspiration.
-      Output a structured design brief: top 3 layout patterns, recommended color palette (hex values), typography stack, key interaction patterns, and specific improvements for a Python daemon monitoring UI.
+      Research current UI/UX design trends and best practices for: {topic}
+      Focus on: layout patterns, visual hierarchy, color strategy, typography, interaction design, and what makes this specific product type feel premium vs generic.
+      Reference relevant best-in-class products as inspiration (e.g. Linear, Vercel, Stripe, Loom, Notion — pick what fits the topic).
+      Output a structured design brief: top 3 layout patterns, recommended color palette (hex values), typography stack, key interaction patterns, and specific design opportunities for this product.
     output_file: null
 
   - id: design
     agent: ux1
     task_type: design
     prompt_template: |
-      Create a complete single-file HTML/CSS/JS dashboard prototype for the WESA Agent Ecosystem monitor.
-      Base your design on this research brief:
+      ## Design task: {topic} — Iteration {iteration}
 
-      {prev_output}
+      ## Research brief:
+      {stage.research}
 
-      Requirements:
-      - Single HTML file with all CSS and JS inline
-      - React 18 via CDN (no build step needed)
-      - Dark theme with monospace font accents
-      - Sections: TopBar (daemon status + agent counts), Task Queue table (ID/TYPE/MODEL/STATUS/CREATED/DURATION columns), Task Log panel (selected task detail)
-      - WebSocket reconnect logic connecting to ws://localhost:8765/ws
+      ## Quality notes from previous review (blank on first pass — use as design principles, not a patch list):
+      {stage.review}
+
+      ---
+
+      Create a complete, polished single-file HTML/CSS/JS prototype for: {topic}
+
+      Rules:
+      - This is a FRESH design — do not replicate or patch the previous iteration
+      - Treat the quality notes above as design principles to raise the bar, not a bug list to fix
+      - Design exactly what is described — not a generic dashboard, not a template
+      - The layout, sections, copy, and interactions must serve this specific product
       Output: complete HTML file only, no explanation text.
-    output_file: "WesaTeam/agent-ecosystem/static/designs/{run_id}_prototype.html"
+    output_file: "WesaTeam/agent-ecosystem/static/designs/{run_id}_v{iteration}_prototype.html"
 
   - id: review
     agent: q1
     task_type: review
     prompt_template: |
-      Score this dashboard HTML prototype on 8 dimensions, each 0-10.
-      Dimensions: Visual Hierarchy, Color & Contrast, Typography, Layout & Spacing, Component Consistency, Data Clarity, Interaction Design, Brand Alignment.
-      For each: score + 2-sentence justification.
+      You are Q1, a senior design critic. Score this HTML prototype for: {topic}
+
+      Score on 8 dimensions, each 0-10:
+      Visual Hierarchy, Color & Contrast, Typography, Layout & Spacing, Component Consistency, Craft & Finish, Originality, Emotional Register
+
+      For each dimension: score + 2-sentence justification.
       End with: TOTAL SCORE: X/80 and TOP 3 IMPROVEMENTS (specific and actionable).
 
-      Prototype:
+      Prototype HTML:
       {prev_output}
-    output_file: "WesaTeam/agent-ecosystem/logs/designs/{run_id}_review.md"
-    stop_if: "score >= 9"
-    loop_to: research
+    output_file: "WesaTeam/agent-ecosystem/logs/designs/{run_id}_v{iteration}_review.md"
+    loop_to: design
+    stop_if: "score >= 72"
 
   - id: skill_update
     agent: su1
     task_type: skill_update
     prompt_template: |
-      A Q1 design review has completed. Update agents/skills/ux_agent.yaml to incorporate the lessons.
-      Strengthen the system_prompt to address the TOP 3 IMPROVEMENTS from this review.
+      A design-loop has completed after {iteration} iterations. Update agents/skills/ux_agent.yaml with the key lessons learned.
+      Focus only on universal design principles from the TOP 3 IMPROVEMENTS — do not add product-specific rules.
+      Improve the skill to produce better designs in future runs without bloating or contradicting existing rules.
 
-      Q1 Review:
-      {prev_output}
+      Final Q1 Review:
+      {stage.review}
     output_file: "WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml"
 
-max_iterations: 3
+max_iterations: 8
 notify_on_complete: true

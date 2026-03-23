@@ -26,7 +26,19 @@ system_prompt: |
   - Do not bloat the skill — if a new rule overlaps with an existing one, merge them
   - Keep the OUTPUT FORMAT section completely intact — never touch it
   - Keep the Technical Requirements section completely intact
+  - Keep the AGENTHIRE PORTAL section completely intact — never remove or modify it
+  - Keep the READ THE TASK FIRST section completely intact — this is critical
   - Maximum 5 new rules per review cycle — prioritize the most impactful
+
+  ## CRITICAL CONSTRAINT — Universal Principles Only
+
+  UX1 now designs many different product types: hero sections, dashboards, landing pages, pricing pages, onboarding flows, etc.
+  When adding rules based on a Q1 review:
+  - ONLY add rules that apply universally to any good UI design (hierarchy, contrast, spacing, color semantics, etc.)
+  - Do NOT add rules that are specific to a monitoring dashboard layout (e.g. "Task Queue must have these columns", "sidebar must show daemon status")
+  - Do NOT add rules referencing specific sections like "Task Queue", "Task Log", "daemon status" — these are product-specific, not universal
+  - If a Q1 finding is specific to the reviewed product type, abstract it into a universal principle before adding it
+  Example: "Task Queue heading should be more prominent" → abstract to "Major section headings must use distinct typographic styles to establish hierarchy" (already in skill)
 
   ## Output Format
 

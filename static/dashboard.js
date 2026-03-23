@@ -91,11 +91,41 @@ const DaemonHealthPanel = ({ daemonStatus, tasks }) => {
     );
 };
 
+const SORT_FIELDS = { STATUS: 'status', MODEL: 'model', CREATED: 'created_at' };
+
 const TaskQueueTable = ({ tasks, selectedTaskId, onSelectTask }) => {
     const [filterToday, setFilterToday] = useState(true);
+    const [sortField, setSortField] = useState('created_at');
+    const [sortDir, setSortDir] = useState('desc');
     const today = new Date().toDateString();
-    const sorted = [...tasks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    const filtered = filterToday ? sorted.filter(t => new Date(t.created_at).toDateString() === today) : sorted;
+
+    const handleSort = (field) => {
+        if (sortField === field) {
+            setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortDir('desc');
+        }
+    };
+
+    const sorted = [...tasks].sort((a, b) => {
+        let va = a[sortField] || '';
+        let vb = b[sortField] || '';
+        if (sortField === 'created_at') { return sortDir === 'asc' ? new Date(va) - new Date(vb) : new Date(vb) - new Date(va); }
+        return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+
+    const filtered = filterToday
+        ? sorted.filter(t => new Date(t.created_at).toDateString() === today)
+        : sorted;
+
+    const thStyle = (field) => ({
+        padding: '7px 12px', textAlign: 'left', fontWeight: 700, fontSize: '0.72em',
+        letterSpacing: '0.1em', borderBottom: '2px solid var(--border)', whiteSpace: 'nowrap',
+        color: sortField === field ? 'var(--text)' : 'var(--muted)',
+        cursor: field ? 'pointer' : 'default', userSelect: 'none',
+    });
+    const sortIcon = (field) => sortField === field ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, overflow: 'hidden', minHeight: 0 }}>
@@ -109,9 +139,12 @@ const TaskQueueTable = ({ tasks, selectedTaskId, onSelectTask }) => {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: '0.78em' }}>
                     <thead>
                         <tr style={{ background: 'var(--surface2)', position: 'sticky', top: 0, zIndex: 1 }}>
-                            {['ID','TYPE','MODEL','STATUS','CREATED','DURATION'].map(h => (
-                                <th key={h} style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 700, fontSize: '0.72em', letterSpacing: '0.1em', color: 'var(--muted)', borderBottom: '2px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
-                            ))}
+                            <th style={thStyle(null)}>ID</th>
+                            <th style={thStyle(null)}>TYPE</th>
+                            <th style={thStyle('model')} onClick={() => handleSort('model')}>MODEL{sortIcon('model')}</th>
+                            <th style={thStyle('status')} onClick={() => handleSort('status')}>STATUS{sortIcon('status')}</th>
+                            <th style={thStyle('created_at')} onClick={() => handleSort('created_at')}>CREATED{sortIcon('created_at')}</th>
+                            <th style={thStyle(null)}>DURATION</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -236,7 +269,7 @@ const DesignsPanel = ({ addToast }) => {
     }, [addToast, selectedDesign]);
 
     if (loading) return <div className="designs-empty"><span>Loading designs...</span></div>;
-    const isConcept  = f => f.filename.startsWith('concept-');
+    const isConcept  = f => (f.filename.startsWith('concept-') || f.filename.endsWith('_prototype.html')) && !f.filename.startsWith('approved-') && !f.filename.startsWith('polished-');
     const isApproved = f => f.filename.startsWith('approved-');
     const isPolished = f => f.filename.startsWith('polished-');
 

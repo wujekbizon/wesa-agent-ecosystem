@@ -21,6 +21,10 @@ Changes in v0.6:
 - PipelineController wired in: on_task_complete() called after every task
 - StagingQueue wired in: Research Center briefs land in logs/staging.db
 - coordinate tasks with START_PIPELINE: prompt trigger pipeline start
+
+Changes in v0.7:
+- Automatic retry with exponential backoff for transient API errors (503, 429, UNAVAILABLE)
+- Retries up to 3 times with delays: 30s -> 60s -> 120s before marking failed
 """
 
 import os
@@ -30,8 +34,9 @@ import sys
 import json
 import uuid
 import re
+import yaml
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -50,6 +55,9 @@ LOGS_RESEARCH_DIR = LOGS_DIR / "research"
 LOGS_DEV_DIR = LOGS_DIR / "dev"
 BRIEFING_FILE = LOGS_DIR / "AXEL_BRIEFING.md"
 POLL_INTERVAL = 3
+RC_INTERVAL_HOURS = int(os.environ.get("RC_INTERVAL_HOURS", "4"))
+RC_SCHEDULE_FILE = LOGS_DIR / "rc_schedule.json"
+RC_PIPELINE_NAME = "research-center"
 
 # Route task type → log subfolder
 TASK_TYPE_LOG_DIR = {
@@ -186,6 +194,20 @@ def strip_code_fences(text: str) -> str:
     return text.strip()
 
 
+# --- Retry logic (v0.7) ---
+
+RETRY_DELAYS = [30, 60, 120]  # seconds between retry attempts
+
+
+def is_transient_error(e: Exception) -> bool:
+    """Return True if the error is a transient API error worth retrying."""
+    msg = str(e).lower()
+    return any(marker in msg for marker in [
+        '503', '429', 'unavailable', 'deadline expired', 'high demand',
+        'resource exhausted', 'service unavailable'
+    ])
+
+
 def queue_axel_skill_update(review_task: Task, queue: TaskQueue):
     """After a Q1 review completes, queue SU1 to update ux_agent.yaml."""
     try:
@@ -223,6 +245,90 @@ def parse_pipeline_trigger(prompt: str):
     return None, None
 
 
+def _load_rc_schedule() -> dict:
+    if RC_SCHEDULE_FILE.exists():
+        try:
+            return json.loads(RC_SCHEDULE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"next_topic_index": 0, "last_triggered_at": None}
+
+
+def _save_rc_schedule(state: dict):
+    RC_SCHEDULE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+STALE_PIPELINE_HOURS = 2  # mark running pipelines as stale after this long
+
+
+def _rc_pipeline_running(pipeline_ctrl: PipelineController) -> bool:
+    """Return True if any research-center pipeline run is currently active (not stale)."""
+    running_dir = pipeline_ctrl.running_dir
+    for f in running_dir.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if data.get("pipeline") != RC_PIPELINE_NAME or data.get("status") != "running":
+                continue
+            # Guard against stale state: if started more than STALE_PIPELINE_HOURS ago, close it
+            started = data.get("started_at")
+            if started:
+                age = datetime.now() - datetime.fromisoformat(started)
+                if age > timedelta(hours=STALE_PIPELINE_HOURS):
+                    data["status"] = "done"
+                    data["note"] = f"Auto-closed: stale running state (age {age})"
+                    f.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                    log(f"[RC] Closed stale pipeline run {f.stem} (age {age})")
+                    continue
+            return True
+        except Exception:
+            pass
+    return False
+
+
+def auto_run_research_center(pipeline_ctrl: PipelineController, queue: TaskQueue):
+    """
+    Called on every daemon poll. Fires the next RC topic when:
+    - No RC pipeline is currently running
+    - At least RC_INTERVAL_HOURS have passed since last trigger
+    """
+    # Load RC pipeline definition to get topics list
+    rc_yaml_path = pipeline_ctrl.pipelines_dir / f"{RC_PIPELINE_NAME}.yaml"
+    if not rc_yaml_path.exists():
+        return
+    try:
+        with open(rc_yaml_path, "r", encoding="utf-8") as f:
+            rc_def = yaml.safe_load(f)
+    except Exception:
+        return
+
+    topics = rc_def.get("topics", [])
+    if not topics:
+        return
+
+    if _rc_pipeline_running(pipeline_ctrl):
+        return
+
+    schedule = _load_rc_schedule()
+    last_run = schedule.get("last_triggered_at")
+    if last_run:
+        elapsed = datetime.now() - datetime.fromisoformat(last_run)
+        if elapsed < timedelta(hours=RC_INTERVAL_HOURS):
+            return
+
+    # Pick next topic (round-robin)
+    idx = schedule.get("next_topic_index", 0) % len(topics)
+    topic = topics[idx]
+
+    log(f"[RC Auto] Triggering research-center — topic {idx + 1}/{len(topics)}: {topic[:60]}...")
+    try:
+        pipeline_ctrl.start_pipeline(RC_PIPELINE_NAME, queue, topic)
+        schedule["next_topic_index"] = (idx + 1) % len(topics)
+        schedule["last_triggered_at"] = datetime.now().isoformat()
+        _save_rc_schedule(schedule)
+    except Exception as e:
+        log(f"[RC Auto] Failed to start pipeline: {e}")
+
+
 def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctrl: PipelineController):
     task = Task.from_file(task_path)
 
@@ -254,7 +360,20 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
     queue.update_status(task.id, "in_progress")
 
     try:
-        result, model_used = router.run(task)
+        # Retry loop: up to 3 retries for transient errors (503, 429, UNAVAILABLE)
+        result, model_used = None, None
+        for attempt in range(len(RETRY_DELAYS) + 1):  # attempts: 0, 1, 2, 3
+            try:
+                result, model_used = router.run(task)
+                break  # success — exit retry loop
+            except Exception as e:
+                if is_transient_error(e) and attempt < len(RETRY_DELAYS):
+                    wait = RETRY_DELAYS[attempt]
+                    log(f"Task {task.id} transient error (attempt {attempt + 1}/3): {e}. Retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    raise  # non-transient, or all retries exhausted — propagate to outer except
+
         task.result = result
         task.model_used = model_used
         task.status = TaskStatus.DONE
@@ -305,7 +424,7 @@ def run():
         staging_queue=staging,
     )
 
-    log("=== WESA Agent Daemon v0.6 STARTED ===")
+    log("=== WESA Agent Daemon v0.7 STARTED ===")
     log(f"Watching:       {TASKS_DIR.resolve()}")
     log(f"Reports:        {LOGS_DIR.resolve()}")
     log(f"SQLite DB:      {(LOGS_DIR / 'tasks.db').resolve()}")
@@ -323,6 +442,10 @@ def run():
     while True:
         try:
             sync_json_to_db(queue)
+            try:
+                auto_run_research_center(pipeline_ctrl, queue)
+            except Exception as e:
+                log(f"[RC Auto] Scheduler error: {e}")
             for task_file in sorted(TASKS_DIR.glob("*.json")):
                 try:
                     process_task(task_file, router, queue, pipeline_ctrl)
