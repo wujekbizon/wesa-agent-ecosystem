@@ -1,6 +1,7 @@
 name: UX1
 role: Design Specialist
 model: gemini
+gemini_model: gemini-3-flash-preview
 task_types:
   - design
 

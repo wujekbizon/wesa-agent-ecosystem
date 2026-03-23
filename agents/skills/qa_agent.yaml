@@ -1,6 +1,7 @@
 name: Q1
 role: QA
 model: gemini
+gemini_model: gemini-3-flash-preview
 task_types:
   - review
 

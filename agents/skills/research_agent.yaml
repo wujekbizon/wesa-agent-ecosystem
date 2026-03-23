@@ -1,6 +1,8 @@
 name: R1
 role: Researcher
 model: gemini
+gemini_model: gemini-3.1-pro-preview
+use_web_search: true
 task_types:
   - research
   - analyze

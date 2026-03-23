@@ -1,6 +1,7 @@
 name: W1
 role: Writer
 model: gemini
+gemini_model: gemini-3-flash-preview
 task_types:
   - write
 
