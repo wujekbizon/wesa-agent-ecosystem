@@ -400,9 +400,10 @@ const App = () => {
         <>
             <TopBar tasks={tasks} daemonStatus={daemonStatus} onRestartDaemon={handleDaemonRestart} />
             <div className="tab-nav">
-                <button className={activeTab==='tasks'   ?'active':''} onClick={() => setActiveTab('tasks')}>Tasks</button>
-                <button className={activeTab==='designs' ?'active':''} onClick={() => setActiveTab('designs')}>Designs</button>
-                <button className={activeTab==='reviews' ?'active':''} onClick={() => setActiveTab('reviews')}>Q1 Reviews</button>
+                <button className={activeTab==='tasks'     ?'active':''} onClick={() => setActiveTab('tasks')}>Tasks</button>
+                <button className={activeTab==='designs'   ?'active':''} onClick={() => setActiveTab('designs')}>Designs</button>
+                <button className={activeTab==='reviews'   ?'active':''} onClick={() => setActiveTab('reviews')}>Q1 Reviews</button>
+                <button className={activeTab==='pipelines' ?'active':''} onClick={() => setActiveTab('pipelines')}>Pipelines</button>
             </div>
             {activeTab === 'tasks' && (
                 <div style={{ display:'grid', gridTemplateColumns:'8fr 4fr', flexGrow:1, overflow:'hidden', minHeight:0 }}>
@@ -413,10 +414,70 @@ const App = () => {
                     <TaskLogPanel detail={selectedTaskDetail} onDeleteTask={handleTaskDelete} />
                 </div>
             )}
-            {activeTab === 'designs' && <div className="main-content"><DesignsPanel addToast={addToast} /></div>}
-            {activeTab === 'reviews' && <div className="main-content"><ReviewsPanel /></div>}
+            {activeTab === 'designs'   && <div className="main-content"><DesignsPanel addToast={addToast} /></div>}
+            {activeTab === 'reviews'   && <div className="main-content"><ReviewsPanel /></div>}
+            {activeTab === 'pipelines' && <div className="main-content"><PipelineLauncherPanel addToast={addToast} /></div>}
             <Toast toasts={toasts} onRemoveToast={removeToast} />
         </>
+    );
+};
+
+const PIPELINES = ['research-center', 'design-loop'];
+
+const PipelineLauncherPanel = ({ addToast }) => {
+    const [pipeline, setPipeline] = useState('research-center');
+    const [topic, setTopic]       = useState('');
+    const [loading, setLoading]   = useState(false);
+
+    const handleLaunch = async () => {
+        if (!topic.trim()) { addToast('Topic is required.', 'error'); return; }
+        setLoading(true);
+        try {
+            const data = await apiFetch('/pipeline/start', 'POST', { pipeline, topic: topic.trim() });
+            addToast(`Pipeline queued — task: ${data.task_id}`, 'success');
+            setTopic('');
+        } catch (err) {
+            addToast(`Failed: ${err.message}`, 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div style={{ maxWidth: 480, margin: '2rem auto' }}>
+            <div className="panel-header" style={{ marginBottom: '1.5rem' }}>Pipeline Launcher</div>
+            <div className="task-detail-section" style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
+                <label style={{ fontSize:'0.75rem', color:'var(--muted)', textTransform:'uppercase', letterSpacing:'0.05em' }}>
+                    Pipeline
+                    <select
+                        value={pipeline}
+                        onChange={e => setPipeline(e.target.value)}
+                        style={{ display:'block', marginTop:'0.4rem', width:'100%', background:'var(--bg)', border:'1px solid var(--border)', borderRadius:4, color:'var(--fg)', padding:'0.5rem 0.75rem', fontSize:'0.875rem' }}
+                    >
+                        {PIPELINES.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                </label>
+                <label style={{ fontSize:'0.75rem', color:'var(--muted)', textTransform:'uppercase', letterSpacing:'0.05em' }}>
+                    Topic
+                    <input
+                        type="text"
+                        value={topic}
+                        onChange={e => setTopic(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleLaunch()}
+                        placeholder="e.g. AgentHire portal design patterns 2026"
+                        style={{ display:'block', marginTop:'0.4rem', width:'100%', background:'var(--bg)', border:'1px solid var(--border)', borderRadius:4, color:'var(--fg)', padding:'0.5rem 0.75rem', fontSize:'0.875rem', boxSizing:'border-box' }}
+                    />
+                </label>
+                <button
+                    onClick={handleLaunch}
+                    disabled={loading}
+                    className="btn-primary"
+                    style={{ marginTop:'0.5rem', opacity: loading ? 0.6 : 1 }}
+                >
+                    {loading ? 'Queuing...' : 'Start Pipeline'}
+                </button>
+            </div>
+        </div>
     );
 };
 

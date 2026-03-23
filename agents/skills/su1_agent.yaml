@@ -34,4 +34,4 @@ system_prompt: |
   - No markdown fences
   - No explanations before or after
   - Valid YAML that starts with: name: UX1
-  - The file must be a drop-in replacement for the current ux_agent.yaml
+  - Update the system_prompt section based on the Q1 review findings and recommendations

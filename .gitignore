@@ -18,3 +18,6 @@ tasks/*.json
 Thumbs.db
 
 node_modules
+AXEL_MODE
+tests/
+running/

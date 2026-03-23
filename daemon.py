@@ -16,6 +16,11 @@ Changes in v0.5:
 - update_briefing() now reads from SQLite (reliable, no JSON file scanning)
 - output_file paths resolved relative to workspace root (not daemon cwd)
 - Removed dead write_output_file() function
+
+Changes in v0.6:
+- PipelineController wired in: on_task_complete() called after every task
+- StagingQueue wired in: Research Center briefs land in logs/staging.db
+- coordinate tasks with START_PIPELINE: prompt trigger pipeline start
 """
 
 import os
@@ -24,6 +29,7 @@ import time
 import sys
 import json
 import uuid
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -33,6 +39,8 @@ from src.task import Task, TaskStatus
 from src.router import Router
 from src.notifier import notify_done, notify_failed, notify_started
 from src.task_queue import TaskQueue
+from src.pipeline_controller import PipelineController
+from src.staging_queue import StagingQueue
 
 # Directories (relative to cwd - run daemon from agent-ecosystem/)
 TASKS_DIR = Path("tasks")
@@ -45,21 +53,20 @@ POLL_INTERVAL = 3
 
 # Route task type → log subfolder
 TASK_TYPE_LOG_DIR = {
-    "design":   LOGS_DESIGNS_DIR,
-    "frontend": LOGS_DESIGNS_DIR,
+    "design":       LOGS_DESIGNS_DIR,
+    "frontend":     LOGS_DESIGNS_DIR,
     "review":       LOGS_DESIGNS_DIR,
     "skill_update": LOGS_DESIGNS_DIR,
-    "research": LOGS_RESEARCH_DIR,
-    "analyze":  LOGS_RESEARCH_DIR,
-    "code":     LOGS_DEV_DIR,
-    "write":    LOGS_DEV_DIR,
-    "test":     LOGS_DEV_DIR,
-    "assets":   LOGS_DEV_DIR,
-    "general":  LOGS_DEV_DIR,
+    "research":     LOGS_RESEARCH_DIR,
+    "analyze":      LOGS_RESEARCH_DIR,
+    "code":         LOGS_DEV_DIR,
+    "write":        LOGS_DEV_DIR,
+    "test":         LOGS_DEV_DIR,
+    "assets":       LOGS_DEV_DIR,
+    "general":      LOGS_DEV_DIR,
 }
 
 # Workspace root: three levels up from daemon.py = Coworker/
-# Used to resolve output_file paths correctly regardless of cwd
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
@@ -100,9 +107,9 @@ def update_briefing(queue: TaskQueue):
     """Rebuild Axel's briefing file from SQLite. Called after every task completes."""
     tasks = queue.get_all()
 
-    done = [t for t in tasks if t.get("status") == "done"]
-    failed = [t for t in tasks if t.get("status") == "failed"]
-    pending = [t for t in tasks if t.get("status") == "pending"]
+    done        = [t for t in tasks if t.get("status") == "done"]
+    failed      = [t for t in tasks if t.get("status") == "failed"]
+    pending     = [t for t in tasks if t.get("status") == "pending"]
     in_progress = [t for t in tasks if t.get("status") == "in_progress"]
 
     lines = [
@@ -173,25 +180,14 @@ def write_report(task: Task):
 
 
 def strip_code_fences(text: str) -> str:
-    """
-    Extract code from agent output for writing to output_file.
-    Handles two cases:
-    - DevAgent style: full markdown response with explanatory text + ```lang ... ``` block
-    - Simple style: output is just a code fence with no surrounding prose
-    Always extracts the first code block found. Falls back to full text if none found.
-    """
-    # Case 1: response contains a fenced code block somewhere inside it
-    # Find first ``` marker (with or without language tag)
-    import re
     match = re.search(r'```(?:\w+)?\n(.*?)```', text, re.DOTALL)
     if match:
         return match.group(1).rstrip()
-    # Case 2: no fenced block - return as-is (write tasks, plain text output)
     return text.strip()
 
 
 def queue_axel_skill_update(review_task: Task, queue: TaskQueue):
-    """After a Q1 review completes, queue Axel to update ux_agent.yaml."""
+    """After a Q1 review completes, queue SU1 to update ux_agent.yaml."""
     try:
         review_content = review_task.result or ""
         skill_path = WORKSPACE_ROOT / "WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml"
@@ -216,10 +212,40 @@ def queue_axel_skill_update(review_task: Task, queue: TaskQueue):
         log(f"Failed to queue Axel skill update: {e}")
 
 
-def process_task(task_path: Path, router: Router, queue: TaskQueue):
+def parse_pipeline_trigger(prompt: str):
+    """
+    Parse 'START_PIPELINE:<name> TOPIC:<topic>' from a coordinate task prompt.
+    Returns (pipeline_name, topic) or (None, None) if format doesn't match.
+    """
+    match = re.match(r'START_PIPELINE:(\S+)\s+TOPIC:(.*)', prompt.strip())
+    if match:
+        return match.group(1), match.group(2).strip()
+    return None, None
+
+
+def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctrl: PipelineController):
     task = Task.from_file(task_path)
 
     if task.status != TaskStatus.PENDING:
+        return
+
+    # coordinate + START_PIPELINE tasks are consumed here — not sent to a worker
+    task_type_str = str(task.type).replace("TaskType.", "")
+    if task_type_str == "coordinate" and task.prompt.startswith("START_PIPELINE:"):
+        pipeline_name, topic = parse_pipeline_trigger(task.prompt)
+        if pipeline_name:
+            log(f"Pipeline trigger: {pipeline_name} | topic: {topic}")
+            try:
+                run_id = pipeline_ctrl.start_pipeline(pipeline_name, queue, topic)
+                log(f"Pipeline '{pipeline_name}' started — run_id: {run_id}")
+            except Exception as e:
+                log(f"Pipeline start failed: {e}")
+        task.status = TaskStatus.DONE
+        task.completed_at = datetime.now().isoformat()
+        task.result = f"Pipeline trigger consumed: {task.prompt}"
+        task.save(task_path)
+        queue.update_status(task.id, "done", result=task.result)
+        update_briefing(queue)
         return
 
     log(f"Processing task {task.id} [{task.type}] ...")
@@ -248,8 +274,11 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue):
         log(f"Task {task.id} DONE via {model_used}")
         notify_done(task.id, task.type, model_used)
 
-        # Post-completion hook: after a Q1 review, queue Axel to update UX1 skill
-        if str(task.type).replace("TaskType.", "") == "review" and task.output_file:
+        # Advance pipeline if this task belongs to one
+        pipeline_ctrl.on_task_complete(task.id, result, queue)
+
+        # Post-completion hook: Q1 review → queue SU1 skill update
+        if task_type_str == "review" and task.output_file:
             queue_axel_skill_update(task, queue)
 
     except Exception as e:
@@ -268,11 +297,19 @@ def run():
     setup_dirs()
     router = Router()
     queue = TaskQueue(db_path=str(LOGS_DIR / "tasks.db"))
+    staging = StagingQueue(db_path=str(LOGS_DIR / "staging.db"))
+    pipeline_ctrl = PipelineController(
+        pipelines_dir=str(Path("agents/pipelines")),
+        tasks_dir=str(TASKS_DIR),
+        workspace_root=str(WORKSPACE_ROOT),
+        staging_queue=staging,
+    )
 
-    log("=== WESA Agent Daemon v0.5 STARTED ===")
+    log("=== WESA Agent Daemon v0.6 STARTED ===")
     log(f"Watching:       {TASKS_DIR.resolve()}")
     log(f"Reports:        {LOGS_DIR.resolve()}")
     log(f"SQLite DB:      {(LOGS_DIR / 'tasks.db').resolve()}")
+    log(f"Staging DB:     {(LOGS_DIR / 'staging.db').resolve()}")
     log(f"Briefing:       {BRIEFING_FILE.resolve()}")
     log(f"Workspace root: {WORKSPACE_ROOT}")
     log(f"Polling every {POLL_INTERVAL}s. Press Ctrl+C to stop.\n")
@@ -288,7 +325,7 @@ def run():
             sync_json_to_db(queue)
             for task_file in sorted(TASKS_DIR.glob("*.json")):
                 try:
-                    process_task(task_file, router, queue)
+                    process_task(task_file, router, queue, pipeline_ctrl)
                 except Exception as e:
                     log(f"Unhandled error on {task_file.name}: {e}")
             time.sleep(POLL_INTERVAL)

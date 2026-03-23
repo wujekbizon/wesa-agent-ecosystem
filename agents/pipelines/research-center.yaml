@@ -1,0 +1,55 @@
+name: research-center
+description: "Research Center pipeline. R1 researches a configured topic, W1 synthesizes a task brief, brief staged for Axel review. Runs per topic in the topics list."
+trigger: scheduled
+stages:
+  - id: research
+    agent: r1
+    task_type: research
+    prompt_template: |
+      Research this topic thoroughly using live web search. Be specific and current.
+      Topic: {topic}
+
+      Output a structured research document:
+      1. Executive Summary (3-5 sentences)
+      2. Key Findings (5-8 bullet points, specific and factual)
+      3. Implications for WESA (how does this affect our agent ecosystem, AgentHire portal, or Wolfmed platform?)
+      4. Recommended Actions (2-3 concrete next steps WESA should consider)
+      5. Sources (list URLs where available)
+    output_file: null
+
+  - id: synthesize
+    agent: w1
+    task_type: write
+    prompt_template: |
+      Convert this raw research into a structured WESA task brief for Axel's review.
+
+      Raw research:
+      {prev_output}
+
+      Output using EXACTLY these headings:
+      ## Goal
+      [1 sentence: what should WESA do based on this research?]
+
+      ## Context
+      [3-5 sentences: why this matters, what was found]
+
+      ## Suggested Task
+      [Concrete task description Axel can approve as-is or modify]
+
+      ## Suggested Agent
+      [Which WESA agent: D1/W1/R1/Q1/UX1/FE1/T1/A1]
+
+      ## Priority
+      [high / medium / low — one sentence justification]
+    output_file: null
+    stage_action: push_to_staging
+
+max_iterations: 1
+notify_on_complete: false
+
+topics:
+  - "WESA agent ecosystem improvement — daemon reliability, task routing, agent quality patterns"
+  - "AgentHire portal — SaaS agent marketplace design patterns and 2026 competitor landscape"
+  - "AI agent frameworks 2026 — LangChain, CrewAI, AutoGen, MCP spec updates and adoption"
+  - "UI/UX dashboard design trends 2026 — SaaS monitoring tools, dark themes, real-time data patterns"
+  - "Developer tools and AI productivity 2026 — code review automation, testing frameworks, CI/CD patterns"

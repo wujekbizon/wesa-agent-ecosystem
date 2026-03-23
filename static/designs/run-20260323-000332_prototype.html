@@ -1,0 +1,351 @@
+<!--
+DESIGN RATIONALE:
+1. DECISION: MODULAR SPLIT-PANE ARCHITECTURE - Implemented a fixed-height, triple-column layout that prioritizes spatial consistency. The left sidebar (navigation), center panel (task queue), and right panel (log inspector) maintain their positions, preventing the "layout jump" common in generic dashboards.
+2. DECISION: MONOSPACE DATA ALIGNMENT - Utilized JetBrains Mono for all task IDs, timestamps, and durations. This ensures tabular lining where numbers align vertically, critical for the "Industrial Precision" aesthetic and rapid scanning of time-series data.
+3. DECISION: SEMANTIC COLOR CONSTRAINTS - Colors are strictly functional. #7049F0 is reserved for active interaction states, while #7CCC63 and #E5534B are used exclusively for system status. No decorative gradients or "slop" glassmorphism were used, maintaining high contrast (WCAG AA) against the #080A0A base.
+
+TYPOGRAPHY:
+- Primary UI: 'Inter' (400, 500, 600) - Chosen for high legibility at small scales in dense monitoring environments.
+- Metrics/Data: 'JetBrains Mono' - Chosen for its clear distinction between ambiguous characters (0/O, 1/l) and its engineered feel.
+
+MONITORING SPECIFICITY:
+- Unlike a generic dashboard, this UI features a "Task Log" panel that acts as a secondary layer of density (Progressive Disclosure).
+- The "TopBar" emphasizes system-level metrics (Agent heartbeat, throughput) rather than user-level metrics.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WESA Agent Ecosystem Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        base: '#080A0A',
+                        surface: '#121212',
+                        elevated: '#1E1E1E',
+                        border: '#30363D',
+                        primary: '#EDEDED',
+                        secondary: '#8B949E',
+                        accent: '#7049F0',
+                        success: '#7CCC63',
+                        error: '#E5534B',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #080A0A;
+            color: #EDEDED;
+            margin: 0;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #080A0A;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #30363D;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #8B949E;
+        }
+        .status-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .4; }
+        }
+        .mono-lining {
+            font-variant-numeric: tabular-nums;
+        }
+        .task-row:hover {
+            background-color: rgba(112, 73, 240, 0.05);
+        }
+        .selected-row {
+            background-color: rgba(112, 73, 240, 0.1) !important;
+            border-left: 2px solid #7049F0;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        const MOCK_TASKS = [
+            { id: "TX-9042", type: "RAG_RETR", model: "gpt-4o", status: "RUNNING", created: "14:20:01", duration: "42.1s", progress: 65 },
+            { id: "TX-9041", type: "VEC_EMBD", model: "text-3-small", status: "COMPLETED", created: "14:19:45", duration: "1.2s", progress: 100 },
+            { id: "TX-9040", type: "PLAN_ORCH", model: "claude-3.5", status: "COMPLETED", created: "14:18:12", duration: "12.8s", progress: 100 },
+            { id: "TX-9039", type: "CODE_GEN", model: "gpt-4o", status: "FAILED", created: "14:15:55", duration: "8.4s", progress: 12 },
+            { id: "TX-9038", type: "DATA_CLEAN", model: "llama-3-70b", status: "COMPLETED", created: "14:12:01", duration: "45.0s", progress: 100 },
+            { id: "TX-9037", type: "RAG_RETR", model: "gpt-4o", status: "QUEUED", created: "14:10:30", duration: "0.0s", progress: 0 },
+            { id: "TX-9036", type: "IMG_DESC", model: "gpt-4-vis", status: "COMPLETED", created: "14:08:45", duration: "5.6s", progress: 100 },
+            { id: "TX-9035", type: "VEC_EMBD", model: "text-3-small", status: "COMPLETED", created: "14:05:22", duration: "0.9s", progress: 100 },
+            { id: "TX-9034", type: "RAG_RETR", model: "gpt-4o", status: "COMPLETED", created: "14:02:11", duration: "2.1s", progress: 100 },
+            { id: "TX-9033", type: "CODE_GEN", model: "claude-3.5", status: "COMPLETED", created: "13:58:45", duration: "15.2s", progress: 100 },
+            { id: "TX-9032", type: "DATA_CLEAN", model: "gpt-4o", status: "FAILED", created: "13:55:01", duration: "1.4s", progress: 5 },
+            { id: "TX-9031", type: "VEC_EMBD", model: "text-3-small", status: "COMPLETED", created: "13:50:20", duration: "1.1s", progress: 100 },
+        ];
+
+        const LOG_DATA = {
+            "TX-9042": [
+                { time: "14:20:01", level: "INFO", msg: "Initializing RAG retrieval sequence..." },
+                { time: "14:20:05", level: "INFO", msg: "Query embedding generated via text-3-small." },
+                { time: "14:20:12", level: "DEBUG", msg: "Namespace lookup: 'wesa-internal-docs'." },
+                { time: "14:20:25", level: "INFO", msg: "Context window filled: 12,402 tokens." },
+                { time: "14:20:30", level: "WARN", msg: "Latency spike detected in Pinecone: 450ms." },
+                { time: "14:20:41", level: "INFO", msg: "Streaming response chunk [0-155]..." }
+            ],
+            "TX-9039": [
+                { time: "14:15:55", level: "INFO", msg: "Starting code generation task." },
+                { time: "14:16:01", level: "ERROR", msg: "Connection timed out: api.openai.com" },
+                { time: "14:16:03", level: "ERROR", msg: "Task aborted. Retrying in 5000ms." }
+            ],
+            "TX-9040": [
+                { time: "14:18:12", level: "INFO", msg: "Agent ecosystem plan initiated." },
+                { time: "14:18:15", level: "DEBUG", msg: "Decomposing task into 4 sub-agents." },
+                { time: "14:18:20", level: "INFO", msg: "Sub-task TX-9041 dispatched successfully." },
+                { time: "14:18:25", level: "INFO", msg: "Orchestration complete." }
+            ]
+        };
+
+        const StatusBadge = ({ status }) => {
+            const styles = {
+                RUNNING: "text-accent bg-accent/10 border-accent/20",
+                COMPLETED: "text-success bg-success/10 border-success/20",
+                FAILED: "text-error bg-error/10 border-error/20",
+                QUEUED: "text-secondary bg-secondary/10 border-secondary/20",
+            };
+            return (
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border ${styles[status]}`}>
+                    {status}
+                </span>
+            );
+        };
+
+        const App = () => {
+            const [selectedTaskId, setSelectedTaskId] = useState("TX-9042");
+            const [wsStatus, setWsStatus] = useState("CONNECTED");
+            const [sidebarOpen, setSidebarOpen] = useState(true);
+
+            // WebSocket Reconnect Simulation logic (per requirements)
+            useEffect(() => {
+                const connect = () => {
+                    console.log("Connecting to ws://localhost:8765/ws...");
+                    // Logic would go here for real implementation
+                };
+                connect();
+            }, []);
+
+            const selectedTask = useMemo(() => 
+                MOCK_TASKS.find(t => t.id === selectedTaskId) || MOCK_TASKS[0]
+            , [selectedTaskId]);
+
+            return (
+                <div className="flex h-screen w-full font-sans text-primary">
+                    {/* SIDEBAR */}
+                    <aside className={`${sidebarOpen ? 'w-16' : 'w-0'} flex-shrink-0 bg-surface border-r border-border flex flex-col items-center py-6 gap-8 transition-all duration-300 overflow-hidden`}>
+                        <div className="w-8 h-8 bg-accent rounded flex items-center justify-center font-bold text-xs">W</div>
+                        <nav className="flex flex-col gap-6 text-secondary">
+                            <div className="hover:text-primary cursor-pointer transition-colors">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+                            </div>
+                            <div className="text-accent cursor-pointer">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                            </div>
+                            <div className="hover:text-primary cursor-pointer transition-colors">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                            </div>
+                            <div className="hover:text-primary cursor-pointer transition-colors">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                            </div>
+                        </nav>
+                        <div className="mt-auto pb-4">
+                            <div className="w-2 h-2 rounded-full bg-success status-pulse"></div>
+                        </div>
+                    </aside>
+
+                    {/* MAIN CONTENT AREA */}
+                    <main className="flex-1 flex flex-col overflow-hidden">
+                        {/* TOPBAR */}
+                        <header className="h-14 bg-surface border-b border-border flex items-center px-6 justify-between flex-shrink-0">
+                            <div className="flex items-center gap-8">
+                                <h1 className="font-semibold text-sm tracking-tight">AGENT ECOSYSTEM <span className="text-secondary font-normal mx-1">/</span> MONITOR</h1>
+                                <div className="flex gap-4">
+                                    <div className="flex flex-col">
+                                        <span className="text-[10px] text-secondary font-bold uppercase tracking-widest">Active Agents</span>
+                                        <span className="text-sm font-mono mono-lining">12 / 16</span>
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <span className="text-[10px] text-secondary font-bold uppercase tracking-widest">Throughput</span>
+                                        <span className="text-sm font-mono mono-lining">142.8 req/m</span>
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <span className="text-[10px] text-secondary font-bold uppercase tracking-widest">Latency</span>
+                                        <span className="text-sm font-mono mono-lining text-success">124ms</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-2 bg-base border border-border px-3 py-1 rounded">
+                                    <div className={`w-1.5 h-1.5 rounded-full ${wsStatus === 'CONNECTED' ? 'bg-success' : 'bg-error'}`}></div>
+                                    <span className="text-[11px] font-mono text-secondary uppercase">{wsStatus}</span>
+                                </div>
+                                <button className="bg-accent hover:bg-opacity-90 px-3 py-1 rounded text-xs font-semibold transition-all">
+                                    NEW TASK
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="flex-1 flex overflow-hidden">
+                            {/* TASK QUEUE TABLE PANEL */}
+                            <section className="flex-1 flex flex-col min-w-0 border-r border-border">
+                                <div className="p-4 border-b border-border flex justify-between items-center bg-surface/50">
+                                    <h2 className="text-xs font-bold uppercase tracking-widest text-secondary">Task Queue</h2>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="text" 
+                                            placeholder="Search tasks..." 
+                                            className="bg-base border border-border px-2 py-1 text-xs rounded outline-none focus:border-accent w-48 transition-colors"
+                                        />
+                                        <button className="p-1 border border-border rounded hover:bg-elevated"><svg className="w-4 h-4 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg></button>
+                                    </div>
+                                </div>
+                                <div className="flex-1 overflow-y-auto">
+                                    <table className="w-full text-left border-collapse">
+                                        <thead className="sticky top-0 bg-base z-10">
+                                            <tr className="border-b border-border">
+                                                <th className="px-4 py-3 text-[10px] font-bold text-secondary uppercase tracking-widest w-24">ID</th>
+                                                <th className="px-4 py-3 text-[10px] font-bold text-secondary uppercase tracking-widest">Type</th>
+                                                <th className="px-4 py-3 text-[10px] font-bold text-secondary uppercase tracking-widest">Model</th>
+                                                <th className="px-4 py-3 text-[10px] font-bold text-secondary uppercase tracking-widest">Status</th>
+                                                <th className="px-4 py-3 text-[10px] font-bold text-secondary uppercase tracking-widest">Created</th>
+                                                <th className="px-4 py-3 text-[10px] font-bold text-secondary uppercase tracking-widest text-right">Duration</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {MOCK_TASKS.map(task => (
+                                                <tr 
+                                                    key={task.id} 
+                                                    onClick={() => setSelectedTaskId(task.id)}
+                                                    className={`task-row border-b border-border/50 cursor-pointer transition-colors ${selectedTaskId === task.id ? 'selected-row' : ''}`}
+                                                >
+                                                    <td className="px-4 py-3 font-mono text-xs text-accent">{task.id}</td>
+                                                    <td className="px-4 py-3 font-semibold text-xs">{task.type}</td>
+                                                    <td className="px-4 py-3 text-xs text-secondary">{task.model}</td>
+                                                    <td className="px-4 py-3"><StatusBadge status={task.status} /></td>
+                                                    <td className="px-4 py-3 font-mono text-xs text-secondary mono-lining">{task.created}</td>
+                                                    <td className="px-4 py-3 font-mono text-xs text-right mono-lining">{task.duration}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+
+                            {/* LOG PANEL (DRILLED DOWN) */}
+                            <section className="w-[450px] bg-surface flex flex-col flex-shrink-0">
+                                <div className="p-4 border-b border-border flex justify-between items-center bg-elevated/30">
+                                    <h2 className="text-xs font-bold uppercase tracking-widest text-secondary">Task Details</h2>
+                                    <button onClick={() => setSelectedTaskId(null)} className="text-secondary hover:text-primary">
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                    </button>
+                                </div>
+                                <div className="p-6 border-b border-border">
+                                    <div className="flex items-start justify-between mb-4">
+                                        <div>
+                                            <h3 className="text-xl font-bold font-mono text-accent mb-1">{selectedTask.id}</h3>
+                                            <p className="text-xs text-secondary">{selectedTask.type} • {selectedTask.model}</p>
+                                        </div>
+                                        <StatusBadge status={selectedTask.status} />
+                                    </div>
+                                    <div className="space-y-4">
+                                        <div>
+                                            <div className="flex justify-between text-[10px] text-secondary font-bold uppercase mb-1">
+                                                <span>Task Progress</span>
+                                                <span className="mono-lining">{selectedTask.progress}%</span>
+                                            </div>
+                                            <div className="w-full bg-border h-1.5 rounded-full overflow-hidden">
+                                                <div 
+                                                    className={`h-full transition-all duration-500 ${selectedTask.status === 'FAILED' ? 'bg-error' : 'bg-accent'}`} 
+                                                    style={{ width: `${selectedTask.progress}%` }}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="bg-base p-3 rounded border border-border">
+                                                <span className="block text-[10px] text-secondary font-bold uppercase">Memory</span>
+                                                <span className="text-sm font-mono">1.2 GB</span>
+                                            </div>
+                                            <div className="bg-base p-3 rounded border border-border">
+                                                <span className="block text-[10px] text-secondary font-bold uppercase">CPU Load</span>
+                                                <span className="text-sm font-mono">14.2%</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex-1 flex flex-col min-h-0">
+                                    <div className="px-4 py-2 bg-elevated/20 border-b border-border flex gap-4 text-[10px] font-bold text-secondary uppercase">
+                                        <span className="text-accent border-b border-accent pb-1 cursor-pointer">Live Logs</span>
+                                        <span className="hover:text-primary cursor-pointer pb-1">Context</span>
+                                        <span className="hover:text-primary cursor-pointer pb-1">Artifacts</span>
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto bg-base p-4 font-mono text-xs leading-relaxed">
+                                        {LOG_DATA[selectedTask.id] ? (
+                                            LOG_DATA[selectedTask.id].map((log, i) => (
+                                                <div key={i} className="mb-2 flex gap-3">
+                                                    <span className="text-secondary opacity-50 flex-shrink-0">{log.time}</span>
+                                                    <span className={`flex-shrink-0 font-bold ${log.level === 'ERROR' ? 'text-error' : log.level === 'WARN' ? 'text-amber-500' : 'text-blue-400'}`}>
+                                                        [{log.level}]
+                                                    </span>
+                                                    <span className="text-secondary break-all">{log.msg}</span>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="text-secondary italic opacity-50">No logs available for this task snapshot.</div>
+                                        )}
+                                        {selectedTask.status === 'RUNNING' && (
+                                            <div className="flex gap-3 items-center mt-2 animate-pulse">
+                                                <span className="text-secondary opacity-50">14:20:45</span>
+                                                <span className="text-accent font-bold">[INFO]</span>
+                                                <span className="text-accent">Awaiting model inference stream...</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

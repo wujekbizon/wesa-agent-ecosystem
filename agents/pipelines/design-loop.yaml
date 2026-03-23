@@ -1,0 +1,60 @@
+name: design-loop
+description: "Automated design improvement loop. R1 research → UX1 prototype → Q1 review → SU1 skill update. Loops up to 3 times or stops early when Q1 score reaches 9/10."
+trigger: manual
+stages:
+  - id: research
+    agent: r1
+    task_type: research
+    prompt_template: |
+      Research current UI/UX design trends for SaaS agent monitoring dashboards (2025-2026).
+      Focus on: dark theme dashboards, real-time status panels, data density vs readability, sidebar navigation patterns, WebSocket-driven live updates.
+      Reference Grafana, Linear, Vercel dashboard, Datadog as inspiration.
+      Output a structured design brief: top 3 layout patterns, recommended color palette (hex values), typography stack, key interaction patterns, and specific improvements for a Python daemon monitoring UI.
+    output_file: null
+
+  - id: design
+    agent: ux1
+    task_type: design
+    prompt_template: |
+      Create a complete single-file HTML/CSS/JS dashboard prototype for the WESA Agent Ecosystem monitor.
+      Base your design on this research brief:
+
+      {prev_output}
+
+      Requirements:
+      - Single HTML file with all CSS and JS inline
+      - React 18 via CDN (no build step needed)
+      - Dark theme with monospace font accents
+      - Sections: TopBar (daemon status + agent counts), Task Queue table (ID/TYPE/MODEL/STATUS/CREATED/DURATION columns), Task Log panel (selected task detail)
+      - WebSocket reconnect logic connecting to ws://localhost:8765/ws
+      Output: complete HTML file only, no explanation text.
+    output_file: "WesaTeam/agent-ecosystem/static/designs/{run_id}_prototype.html"
+
+  - id: review
+    agent: q1
+    task_type: review
+    prompt_template: |
+      Score this dashboard HTML prototype on 8 dimensions, each 0-10.
+      Dimensions: Visual Hierarchy, Color & Contrast, Typography, Layout & Spacing, Component Consistency, Data Clarity, Interaction Design, Brand Alignment.
+      For each: score + 2-sentence justification.
+      End with: TOTAL SCORE: X/80 and TOP 3 IMPROVEMENTS (specific and actionable).
+
+      Prototype:
+      {prev_output}
+    output_file: "WesaTeam/agent-ecosystem/logs/designs/{run_id}_review.md"
+    stop_if: "score >= 9"
+    loop_to: research
+
+  - id: skill_update
+    agent: su1
+    task_type: skill_update
+    prompt_template: |
+      A Q1 design review has completed. Update agents/skills/ux_agent.yaml to incorporate the lessons.
+      Strengthen the system_prompt to address the TOP 3 IMPROVEMENTS from this review.
+
+      Q1 Review:
+      {prev_output}
+    output_file: "WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml"
+
+max_iterations: 3
+notify_on_complete: true

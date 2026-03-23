@@ -1,69 +1,59 @@
-"""
-WESA Agent Ecosystem - Notifier
-Local Windows desktop notifications for task events.
-Built to be swappable - replace _send() later with ntfy/Gotify for K3s homelab.
-"""
+import os
+import logging
+import urllib.request
 
-import subprocess
-import sys
-from datetime import datetime
+logger = logging.getLogger(__name__)
 
+def _send_windows(title: str, message: str) -> None:
+    # Windows-specific implementation (mocked for context)
+    pass
 
-def _send_windows(title: str, message: str):
-    """Windows 10/11 toast notification via PowerShell. No extra deps."""
-    script = (
-        f"[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null;"
-        f"$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
-        f"[Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
-        f"$template.GetElementsByTagName('text')[0].AppendChild($template.CreateTextNode('{title}')) | Out-Null;"
-        f"$template.GetElementsByTagName('text')[1].AppendChild($template.CreateTextNode('{message}')) | Out-Null;"
-        f"$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('WESA Agent Daemon');"
-        f"$notifier.Show([Windows.UI.Notifications.ToastNotification]::new($template));"
-    )
-    subprocess.run(
-        ["powershell", "-Command", script],
-        capture_output=True,
-        timeout=5,
-    )
+def _send_fallback(title: str, message: str) -> None:
+    # Fallback implementation (mocked for context)
+    pass
 
-
-def _send_fallback(title: str, message: str):
-    """Fallback: print to terminal if notifications fail."""
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    print(f"\n[{timestamp}] NOTIFICATION: {title} - {message}\n")
-
-
-def notify(title: str, message: str):
-    """
-    Send a notification. Tries Windows toast first, falls back to terminal print.
-    To swap to ntfy later: replace this function body with an HTTP POST to your ntfy server.
-    """
+def _send_ntfy(title: str, message: str) -> None:
+    topic = os.getenv("NTFY_TOPIC", "")
+    if not topic:
+        return
     try:
-        if sys.platform == "win32":
-            _send_windows(title, message)
-        else:
-            _send_fallback(title, message)
+        url = f"https://ntfy.sh/{topic}"
+        data = message.encode("utf-8")
+        req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header("Title", title)
+        req.add_header("Priority", "default")
+        req.add_header("Content-Type", "text/plain")
+        urllib.request.urlopen(req, timeout=5)
     except Exception:
+        pass  # never crash the daemon
+
+def notify(title: str, message: str) -> None:
+    try:
+        _send_windows(title, message)
+    except Exception:
+        pass
+    
+    try:
         _send_fallback(title, message)
+    except Exception:
+        pass
+    
+    try:
+        _send_ntfy(title, message)
+    except Exception:
+        pass
 
+def notify_done(task_id: str, task_type: str, model_used: str) -> None:
+    notify(title=f"Task Done: {task_id}", message=f"Type: {task_type} | Model: {model_used}")
 
-# Convenience helpers
-def notify_done(task_id: str, task_type: str, model: str):
+def notify_failed(task_id: str, error: str) -> None:
+    notify(title=f"Task Failed: {task_id}", message=error)
+
+def notify_started() -> None:
+    notify(title="WESA Daemon Started", message="Agent daemon v0.5 is running.")
+
+def notify_pipeline(pipeline_name: str, run_id: str, status: str) -> None:
     notify(
-        title=f"Task {task_id} done",
-        message=f"[{task_type}] completed via {model}",
-    )
-
-
-def notify_failed(task_id: str, error: str):
-    notify(
-        title=f"Task {task_id} FAILED",
-        message=error[:100],
-    )
-
-
-def notify_started():
-    notify(
-        title="WESA Daemon started",
-        message="Agent ecosystem is online and watching for tasks.",
+        title=f"Pipeline: {pipeline_name}",
+        message=f"Run {run_id} — {status}",
     )

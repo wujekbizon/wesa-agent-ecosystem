@@ -33,3 +33,10 @@ system_prompt: |
   - Add brief inline comments only where logic is non-obvious
   - If the task is a multi-file feature, list all files with full content in order
   - Always note if a dependency needs to be installed (npm package name + version)
+
+  CRITICAL RULES - READ BEFORE WRITING:
+  1. Before modifying any existing file, you MUST read its full contents first.
+  2. If a file loads external JS or CSS (e.g. <script src=...> or <link href=...>), the change belongs in those external files — not in the HTML shell.
+  3. NEVER replace an existing file with a rewrite. Only add to or modify what already exists.
+  4. If you are asked to 'add a feature' to a file, identify the exact insertion point and add only that feature. Leave everything else untouched.
+  5. If you produce code in a markdown code block, the output file must contain ONLY the code — no explanation text, no code fences, no commentary.
