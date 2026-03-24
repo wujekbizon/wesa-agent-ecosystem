@@ -29,6 +29,7 @@ Changes in v0.7:
 
 import os
 import signal
+import threading
 import time
 import sys
 import json
@@ -43,7 +44,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from src.task import Task, TaskStatus
 from src.router import Router
-from src.notifier import notify_done, notify_failed, notify_started
+from src.notifier import notify_done, notify_failed, notify_started, start_ntfy_listener
 from src.task_queue import TaskQueue
 from src.pipeline_controller import PipelineController
 from src.staging_queue import StagingQueue
@@ -555,7 +556,29 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
         update_briefing(queue)
         log(f"Task {task.id} FAILED: {e}")
         notify_failed(task.id, str(e))
-
+        
+def handle_ntfy_message(msg: dict) -> None:
+    raw = (msg.get("message") or "").strip()
+     # Ignore outbound daemon notifications echoed back by ntfy
+    if "Model:" in raw:
+        return
+    if ":" in raw:
+        prefix, _, rest = raw.partition(":")
+        task_type = prefix.strip().lower()
+        prompt    = rest.strip()
+    else:
+        task_type = "general"
+        prompt    = raw
+    task = {
+        "id":         f"ntfy-{uuid.uuid4().hex[:8]}",
+        "type":       task_type,
+        "prompt":     prompt,
+        "status":     "pending",
+        "created_at": datetime.now().isoformat(),
+    }
+    task_path = TASKS_DIR / f"{task['id']}.json"
+    task_path.write_text(json.dumps(task, indent=2), encoding="utf-8")
+    log(f"[ntfy] Task {task['id']} [{task_type}]: {prompt[:60]}")
 
 def run():
     setup_dirs()
@@ -583,6 +606,9 @@ def run():
     notify_started()
     sync_json_to_db(queue)
     update_briefing(queue)
+    
+    ntfy_stop = threading.Event()
+    start_ntfy_listener(handle_ntfy_message, ntfy_stop)
 
     while True:
         try:
@@ -604,3 +630,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+
