@@ -363,6 +363,40 @@ async def discard_brief(brief_id: str):
     staging.update_status(brief_id, "discarded")
     return {"ok": True}
 
+# --- Task Submission ---
+
+class TaskSubmitRequest(BaseModel):
+    type: str
+    prompt: str
+    output_file: str = ""
+
+VALID_TASK_TYPES = {"research", "write", "code", "design", "frontend", "review", "test", "assets", "general", "git"}
+
+@app.post("/api/tasks")
+async def submit_task(req: TaskSubmitRequest):
+    task_type = req.type.strip().lower()
+    if task_type not in VALID_TASK_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid task type '{task_type}'. Must be one of: {', '.join(sorted(VALID_TASK_TYPES))}")
+    # git tasks allow empty prompt — daemon auto-injects live git diff context
+    if not req.prompt.strip() and task_type != "git":
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty")
+
+    task_id = f"manual-{uuid.uuid4().hex[:8]}"
+    task = {
+        "id": task_id,
+        "type": task_type,
+        "prompt": req.prompt.strip(),
+        "output_file": req.output_file.strip(),
+        "status": "pending",
+        "created_at": datetime.now().isoformat(),
+        "completed_at": "",
+        "result": "",
+        "error": "",
+        "model_used": "",
+    }
+    (TASKS_DIR / f"{task_id}.json").write_text(json.dumps(task, indent=2), encoding="utf-8")
+    return {"ok": True, "task_id": task_id}
+
 # --- Pipeline Trigger ---
 
 class PipelineStartRequest(BaseModel):
@@ -405,6 +439,58 @@ async def daemon_status():
         except (ValueError, ProcessLookupError, OSError):
             return {"running": False, "pid": pid}
     return {"running": False, "pid": None}
+
+RC_ENABLED_FILE = LOGS_DIR / "rc_enabled.flag"
+RC_SCHEDULE_FILE = LOGS_DIR / "rc_schedule.json"
+
+@app.get("/api/scheduler/status")
+async def scheduler_status():
+    enabled = RC_ENABLED_FILE.exists()
+    schedule = {}
+    if RC_SCHEDULE_FILE.exists():
+        try:
+            schedule = json.loads(RC_SCHEDULE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {
+        "enabled": enabled,
+        "last_triggered_at": schedule.get("last_triggered_at"),
+        "next_topic_index": schedule.get("next_topic_index", 0),
+    }
+
+@app.post("/api/scheduler/enable")
+async def scheduler_enable():
+    RC_ENABLED_FILE.write_text("enabled", encoding="utf-8")
+    return {"ok": True, "enabled": True}
+
+@app.post("/api/scheduler/disable")
+async def scheduler_disable():
+    RC_ENABLED_FILE.unlink(missing_ok=True)
+    return {"ok": True, "enabled": False}
+
+PIPELINES_RUNNING_DIR = BASE_DIR / "agents" / "pipelines" / "running"
+
+@app.get("/api/pipelines/running")
+async def get_running_pipelines():
+    runs = []
+    if not PIPELINES_RUNNING_DIR.exists():
+        return runs
+    for f in sorted(PIPELINES_RUNNING_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            runs.append({
+                "run_id": data.get("run_id", f.stem),
+                "pipeline": data.get("pipeline", ""),
+                "topic": data.get("topic", ""),
+                "status": data.get("status", ""),
+                "iteration": data.get("iteration", 1),
+                "started_at": data.get("started_at", ""),
+                "ended_at": data.get("ended_at", ""),
+                "stop_reason": data.get("stop_reason", ""),
+            })
+        except Exception:
+            continue
+    return runs
 
 @app.post("/api/daemon/restart")
 async def daemon_restart():

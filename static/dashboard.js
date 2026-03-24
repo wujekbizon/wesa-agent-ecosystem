@@ -64,14 +64,49 @@ const TopBar = ({ tasks, daemonStatus, onRestartDaemon }) => {
     );
 };
 
-const DaemonHealthPanel = ({ daemonStatus, tasks }) => {
+const DaemonHealthPanel = ({ daemonStatus, tasks, addToast }) => {
     const running = daemonStatus.running;
     const c = tasks.reduce((a, t) => { a[t.status] = (a[t.status] || 0) + 1; return a; }, {});
+    const [scheduler, setScheduler] = React.useState(null);
+
+    React.useEffect(() => {
+        apiFetch('/scheduler/status').then(setScheduler).catch(() => {});
+    }, []);
+
+    const toggleScheduler = async () => {
+        if (!scheduler) return;
+        const endpoint = scheduler.enabled ? '/scheduler/disable' : '/scheduler/enable';
+        try {
+            const data = await apiFetch(endpoint, 'POST');
+            setScheduler(prev => ({ ...prev, enabled: data.enabled }));
+            addToast(`Research scheduler ${data.enabled ? 'enabled' : 'disabled'}.`, 'info');
+        } catch (err) {
+            addToast('Scheduler toggle failed: ' + err.message, 'error');
+        }
+    };
+
     return (
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', background: running ? 'var(--surface)' : 'rgba(255,51,51,0.05)', flexShrink: 0 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                 <span style={{ fontFamily: 'var(--font-ui)', fontSize: '0.68em', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>Daemon Health</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72em', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: running ? 'var(--done)' : 'var(--failed)' }}>● {running ? 'RUNNING' : 'STOPPED'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    {scheduler !== null && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62em', color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>RC Scheduler</span>
+                            <button onClick={toggleScheduler} style={{
+                                fontFamily: 'var(--font-mono)', fontSize: '0.62em', fontWeight: 700,
+                                letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer',
+                                border: 'none', borderRadius: '2px', padding: '2px 8px',
+                                background: scheduler.enabled ? 'var(--done)' : 'var(--surface2)',
+                                color: scheduler.enabled ? '#000' : 'var(--muted)',
+                                outline: scheduler.enabled ? 'none' : '1px solid var(--border)',
+                            }}>
+                                {scheduler.enabled ? '● ON' : '○ OFF'}
+                            </button>
+                        </div>
+                    )}
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72em', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: running ? 'var(--done)' : 'var(--failed)' }}>● {running ? 'RUNNING' : 'STOPPED'}</span>
+                </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
                 {[
@@ -434,24 +469,207 @@ const App = () => {
             <TopBar tasks={tasks} daemonStatus={daemonStatus} onRestartDaemon={handleDaemonRestart} />
             <div className="tab-nav">
                 <button className={activeTab==='tasks'     ?'active':''} onClick={() => setActiveTab('tasks')}>Tasks</button>
+                <button className={activeTab==='submit'    ?'active':''} onClick={() => setActiveTab('submit')}>Submit Task</button>
                 <button className={activeTab==='designs'   ?'active':''} onClick={() => setActiveTab('designs')}>Designs</button>
                 <button className={activeTab==='reviews'   ?'active':''} onClick={() => setActiveTab('reviews')}>Q1 Reviews</button>
                 <button className={activeTab==='pipelines' ?'active':''} onClick={() => setActiveTab('pipelines')}>Pipelines</button>
+                <button className={activeTab==='help'      ?'active':''} onClick={() => setActiveTab('help')}>Help</button>
             </div>
             {activeTab === 'tasks' && (
                 <div style={{ display:'grid', gridTemplateColumns:'8fr 4fr', flexGrow:1, overflow:'hidden', minHeight:0 }}>
                     <div style={{ display:'flex', flexDirection:'column', overflow:'hidden' }}>
-                        <DaemonHealthPanel daemonStatus={daemonStatus} tasks={tasks} />
+                        <DaemonHealthPanel daemonStatus={daemonStatus} tasks={tasks} addToast={addToast} />
                         <TaskQueueTable tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={handleTaskSelect} />
                     </div>
                     <TaskLogPanel detail={selectedTaskDetail} onDeleteTask={handleTaskDelete} />
                 </div>
             )}
+            {activeTab === 'submit'    && <div className="main-content"><TaskSubmitPanel addToast={addToast} /></div>}
             {activeTab === 'designs'   && <div className="main-content"><DesignsPanel addToast={addToast} /></div>}
             {activeTab === 'reviews'   && <div className="main-content"><ReviewsPanel /></div>}
             {activeTab === 'pipelines' && <div className="main-content"><PipelineLauncherPanel addToast={addToast} /></div>}
+            {activeTab === 'help'      && <div className="main-content"><HelpPanel /></div>}
             <Toast toasts={toasts} onRemoveToast={removeToast} />
         </>
+    );
+};
+
+const TASK_TYPES = ['research', 'write', 'code', 'design', 'frontend', 'review', 'test', 'assets', 'git', 'general'];
+
+const TASK_TYPE_HINTS = {
+    research:  'R1 — Gemini 3.1 Pro. Live web search. Use for: market research, competitive analysis, tech landscape.',
+    write:     'W1 — Gemini 2.5 Flash. Use for: docs, content, markdown reports, summaries.',
+    code:      'D1 — Ollama (local). Use for: Python scripts, CLI tools, backend logic.',
+    design:    'UX1 — Gemini 3 Flash. Use for: HTML prototypes, UI concepts, design specs.',
+    frontend:  'FE1 — Gemini 2.5 Flash. Use for: React components, Next.js pages, implementation plans.',
+    review:    'Q1 — Gemini 3.1 Pro. Use for: design critique, code review, quality assessment.',
+    test:      'T1 — Gemini 2.5 Flash. Use for: Playwright tests, test plans, QA specs.',
+    assets:    'A1 — Nano Banana Pro. Use for: image generation, icons, visual assets.',
+    git:       'G1 — Ollama (local). Prompt is OPTIONAL — daemon auto-reads git diff and injects it. Just submit with an empty prompt or add a short note. Never pushes.',
+    general:   'Gemini 2.5 Flash. Use for: anything that doesn\'t fit the above.',
+};
+
+const TaskSubmitPanel = ({ addToast }) => {
+    const [taskType, setTaskType] = useState('research');
+    const [prompt, setPrompt]     = useState('');
+    const [outputFile, setOutputFile] = useState('');
+    const [loading, setLoading]   = useState(false);
+
+    const handleSubmit = async () => {
+        if (!prompt.trim() && taskType !== 'git') { addToast('Prompt is required.', 'error'); return; }
+        setLoading(true);
+        try {
+            const data = await apiFetch('/tasks', 'POST', { type: taskType, prompt: prompt.trim(), output_file: outputFile.trim() });
+            addToast(`Task queued — ${data.task_id}`, 'success');
+            setPrompt('');
+            setOutputFile('');
+        } catch (err) {
+            addToast(`Failed: ${err.message}`, 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="panel-page">
+            <div className="panel-form">
+                <div className="panel-form-header">Submit Task</div>
+
+                <div>
+                    <label className="panel-label">Task Type</label>
+                    <select className="panel-select" value={taskType} onChange={e => setTaskType(e.target.value)}>
+                        {TASK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                </div>
+
+                <div className="panel-hint">{TASK_TYPE_HINTS[taskType]}</div>
+
+                <div>
+                    <label className="panel-label">Prompt</label>
+                    <textarea
+                        className="panel-textarea"
+                        value={prompt}
+                        onChange={e => setPrompt(e.target.value)}
+                        placeholder="Describe what you want the agent to do..."
+                        rows={7}
+                        style={{ resize: 'vertical', lineHeight: 1.6 }}
+                    />
+                </div>
+
+                <div>
+                    <label className="panel-label">Output File <span style={{ fontWeight: 400, textTransform: 'none', opacity: 0.6 }}>(optional — relative to workspace root)</span></label>
+                    <input
+                        type="text"
+                        className="panel-input"
+                        value={outputFile}
+                        onChange={e => setOutputFile(e.target.value)}
+                        placeholder="e.g. WesaTeam/agent-ecosystem/logs/my-output.md"
+                    />
+                </div>
+
+                <button className="btn-primary" onClick={handleSubmit} disabled={loading} style={{ alignSelf: 'flex-start' }}>
+                    {loading ? 'Queuing...' : 'Queue Task →'}
+                </button>
+            </div>
+        </div>
+    );
+};
+
+const DOCS = [
+    {
+        section: 'Tasks Tab',
+        items: [
+            { title: 'Task Queue Table', body: 'Lists all tasks. Filterable by today / all-time. Sortable by status, model, or created date. Click any row to load details in the right panel.' },
+            { title: 'Task Detail Panel', body: 'Three tabs: Overview (prompt + metadata), Result (agent output), Error (failure reason). Delete button removes the task from queue and DB.' },
+            { title: 'RC Scheduler Toggle', body: 'ON/OFF switch for the autonomous Research Center scheduler. When ON, the daemon fires one research-center pipeline run every RC_INTERVAL_HOURS (default 4h), rotating through all 5 topics in round-robin. State persists in logs/rc_enabled.flag — survives restarts. Default: OFF.' },
+            { title: 'Daemon Health Panel', body: 'Shows PID, task counts by status, and daemon running state. Daemon is the background process that executes tasks. Restart button sends SIGTERM and relaunches daemon.py.' },
+        ],
+    },
+    {
+        section: 'Submit Task Tab',
+        items: [
+            { title: 'What it does', body: 'Manually queue a single task for any agent. The daemon picks it up within 3 seconds.' },
+            { title: 'Task Types & Agents', body: 'research → R1 (web search, Gemini 3.1 Pro) | write → W1 (Gemini 3 Flash) | code → D1 (Ollama qwen3.5:35b) | design → UX1 (Gemini 3 Flash) | frontend → FE1 (Gemini 3 Flash) | review → Q1 (Gemini 3.1 Pro) | test → T1 | assets → A1 (Nano Banana Pro) | git → G1 (Ollama qwen3.5:35b, local) | general → W1' },
+            { title: 'git task — zero effort', body: 'Select type "git" and submit with an empty prompt (or a short note). The daemon auto-runs git status + git diff HEAD, injects the output into G1\'s context, and G1 returns a ready-to-run PowerShell commit block. No copy-pasting diffs.' },
+            { title: 'Output File', body: 'Optional. Path relative to Coworker/ workspace root. If set, daemon writes agent result to that file on completion. E.g. WesaTeam/agent-ecosystem/logs/my-output.md' },
+            { title: 'Routing rule', body: 'Routing is by task_type only — the agent field in pipeline YAMLs is documentation. task_type must be unique across all skill YAMLs or the last file alphabetically wins silently.' },
+        ],
+    },
+    {
+        section: 'Pipelines Tab',
+        items: [
+            { title: 'research-center', body: 'R1 researches a topic → W1 synthesizes a WESA task brief → brief staged for Axel review. Runs once per topic. 5 topics in rotation. Trigger: manual (or auto via RC Scheduler).' },
+            { title: 'design-loop', body: 'R1 researches 3 ranked design directions → UX1 prototypes the most original → Q1 scores (target 72/80) → SU1 updates skill overlay → loops back to UX1. Max 8 iterations. On approval: SU1 permanently merges tips into ux_agent.yaml. Trigger: manual.' },
+            { title: 'Pipeline Architecture', body: 'Stages defined in agents/pipelines/*.yaml. loop_to field creates the iteration loop. stop_if: "score >= 72" parses Q1 output for X/80 pattern. {stage.<id>} injects previous stage output. {read_file:<path>} injects file contents at queue time.' },
+        ],
+    },
+    {
+        section: 'Designs Tab',
+        items: [
+            { title: 'Concept Preview', body: 'Lists all HTML prototype files from static/designs/. Click to preview in iframe. Concepts are outputs from UX1 via the design-loop pipeline.' },
+            { title: 'Approve', body: 'Queues three tasks: UX1 polish pass, FE1 implementation plan, Q1 final review. This is the human gate in the design loop — only approved designs trigger skill_merge.' },
+            { title: 'Retry', body: 'Add feedback, dismiss the current concept, and queue a fresh UX1 design task. Feedback is injected into the UX1 prompt.' },
+            { title: 'File naming', body: 'concept-* = raw prototype | approved-* = approved for polish | polished-* = finished. Prefixes control which actions are shown.' },
+        ],
+    },
+    {
+        section: 'Q1 Reviews Tab',
+        items: [
+            { title: 'What it shows', body: 'All Q1 review markdown files from logs/designs/. Each review scores 8 dimensions (Visual Hierarchy, Color, Typography, Layout, Consistency, Craft, Originality, Emotional Register) out of 10 each. Total 80.' },
+            { title: 'Stop condition', body: 'Design loop exits when Q1 total score >= 72/80. On exit: skill_merge stage fires, SU1 merges accumulated overlay tips into ux_agent.yaml permanently.' },
+        ],
+    },
+    {
+        section: 'Agent Roster',
+        items: [
+            { title: 'Axel', body: 'Team Lead. Claude Sonnet via Cowork. Orchestrates all other agents. Greg only talks to Axel.' },
+            { title: 'R1', body: 'Researcher. gemini-3.1-pro-preview. use_web_search: true. Live Google Search grounding. 120s timeout (concurrent.futures wrapper).' },
+            { title: 'W1', body: 'Writer. gemini-3-flash-preview. Docs, content, markdown, PRDs, synthesis.' },
+            { title: 'D1', body: 'Developer. qwen3.5:35b (Ollama, local). Python, backend, CLI. Keep tasks to ONE file — hallucinates on multi-file context.' },
+            { title: 'UX1', body: 'Designer. gemini-3-flash-preview. HTML prototypes. Two-tier skill system: per-run overlay during loop, permanent merge to ux_agent.yaml on approval only.' },
+            { title: 'FE1', body: 'Frontend Engineer. gemini-3-flash-preview. React 19, Next.js, implementation plans.' },
+            { title: 'Q1', body: 'Design Critic. gemini-3.1-pro-preview. Independent voice — framed as external critic, not team member. Scores designs 0–80.' },
+            { title: 'SU1', body: 'Skill Updater. gemini-2.5-flash. Reads Q1 reviews, writes per-run overlays. Merges to ux_agent.yaml on pipeline approval. Requires full current skill file in prompt to avoid truncation.' },
+            { title: 'PM1', body: 'Project Manager. gemini-3-flash-preview. Coordinates FE1+T1 build-test loops. Not yet in production (Sprint 2).' },
+            { title: 'T1', body: 'Tester. gemini-2.5-flash. Playwright, test plans, QA specs.' },
+            { title: 'A1', body: 'Assets. gemini-2.5-flash + Nano Banana Pro API. Image generation, icons. API key valid till May 2026.' },
+            { title: 'G1', body: 'Git Agent. qwen3.5:35b (Ollama, local). Prompt is optional — daemon auto-runs git status + git diff HEAD and injects the output before routing. G1 reads the actual diff and produces a PowerShell-ready git add + commit block. Never pushes. Greg reviews and runs the block manually.' },
+        ],
+    },
+    {
+        section: 'Infrastructure',
+        items: [
+            { title: 'Daemon', body: 'daemon.py — polls tasks/ folder every 3s, imports JSON to SQLite, routes by task_type, executes via Router → GeminiAgent or OllamaAgent. No restart needed for new tasks — drop JSON and daemon picks up.' },
+            { title: 'Task Queue', body: 'SQLite-backed (logs/tasks.db). JSON files in tasks/ are imported on every poll via sync_json_to_db(). Direct SQLite writes unreliable on Windows NTFS mount — always use JSON file drop.' },
+            { title: 'Gemini Timeout', body: 'All Gemini calls wrapped in concurrent.futures with 120s hard timeout (GEMINI_TIMEOUT env var). Prevents tasks hanging forever on API stall.' },
+            { title: 'Notifications', body: 'ntfy.sh push to phone. Set NTFY_TOPIC in .env. Fires on: task done, task failed, daemon start, pipeline complete.' },
+            { title: 'Git rules', body: 'agent-ecosystem/ → GitHub (public, safe to push). All WesaTeam/ folders → LOCAL ONLY, confidential, never push. Axel stages files, Greg commits from Windows PowerShell.' },
+            { title: 'output_file paths', body: 'Resolved relative to WORKSPACE_ROOT (Coworker/). Always prefix: WesaTeam/agent-ecosystem/<path> for ecosystem files. Never bare paths — they write to Coworker root.' },
+        ],
+    },
+];
+
+const HelpPanel = () => {
+    const [activeSection, setActiveSection] = React.useState(0);
+
+    return (
+        <div className="help-layout">
+            <div className="help-sidebar">
+                {DOCS.map((sec, si) => (
+                    <div key={si} className={`help-sidebar-item ${activeSection === si ? 'active' : ''}`} onClick={() => setActiveSection(si)}>
+                        {sec.section}
+                    </div>
+                ))}
+            </div>
+            <div className="help-content">
+                {DOCS[activeSection] && DOCS[activeSection].items.map((item, ii) => (
+                    <div key={ii}>
+                        <div className="help-item-title">{item.title}</div>
+                        <div className="help-item-body">{item.body}</div>
+                    </div>
+                ))}
+            </div>
+        </div>
     );
 };
 
@@ -461,6 +679,15 @@ const PipelineLauncherPanel = ({ addToast }) => {
     const [pipeline, setPipeline] = useState('research-center');
     const [topic, setTopic]       = useState('');
     const [loading, setLoading]   = useState(false);
+    const [runs, setRuns]         = React.useState([]);
+    const [selectedRun, setSelectedRun] = React.useState(null);
+
+    React.useEffect(() => {
+        const fetchRuns = () => apiFetch('/pipelines/running').then(setRuns).catch(() => {});
+        fetchRuns();
+        const i = setInterval(fetchRuns, 5000);
+        return () => clearInterval(i);
+    }, []);
 
     const handleLaunch = async () => {
         if (!topic.trim()) { addToast('Topic is required.', 'error'); return; }
@@ -476,39 +703,51 @@ const PipelineLauncherPanel = ({ addToast }) => {
         }
     };
 
+    const runStatusColor = (s) => ({ running: 'var(--in-progress)', done: 'var(--done)', failed: 'var(--failed)' })[s] || 'var(--muted)';
+
     return (
-        <div style={{ maxWidth: 480, margin: '2rem auto' }}>
-            <div className="panel-header" style={{ marginBottom: '1.5rem' }}>Pipeline Launcher</div>
-            <div className="task-detail-section" style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
-                <label style={{ fontSize:'0.75rem', color:'var(--muted)', textTransform:'uppercase', letterSpacing:'0.05em' }}>
-                    Pipeline
-                    <select
-                        value={pipeline}
-                        onChange={e => setPipeline(e.target.value)}
-                        style={{ display:'block', marginTop:'0.4rem', width:'100%', background:'var(--bg)', border:'1px solid var(--border)', borderRadius:4, color:'var(--fg)', padding:'0.5rem 0.75rem', fontSize:'0.875rem' }}
-                    >
-                        {PIPELINES.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                </label>
-                <label style={{ fontSize:'0.75rem', color:'var(--muted)', textTransform:'uppercase', letterSpacing:'0.05em' }}>
-                    Topic
-                    <input
-                        type="text"
-                        value={topic}
-                        onChange={e => setTopic(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && handleLaunch()}
-                        placeholder="e.g. AgentHire portal design patterns 2026"
-                        style={{ display:'block', marginTop:'0.4rem', width:'100%', background:'var(--bg)', border:'1px solid var(--border)', borderRadius:4, color:'var(--fg)', padding:'0.5rem 0.75rem', fontSize:'0.875rem', boxSizing:'border-box' }}
-                    />
-                </label>
-                <button
-                    onClick={handleLaunch}
-                    disabled={loading}
-                    className="btn-primary"
-                    style={{ marginTop:'0.5rem', opacity: loading ? 0.6 : 1 }}
-                >
-                    {loading ? 'Queuing...' : 'Start Pipeline'}
-                </button>
+        <div className="pipeline-layout">
+            <div className="pipeline-list">
+                <div style={{ padding: '8px 14px', fontSize: '0.68rem', fontWeight: 700, color: 'var(--muted)', borderBottom: '1px solid var(--border)', textTransform: 'uppercase', letterSpacing: '0.1em', background: 'var(--surface2)', fontFamily: 'var(--font-ui)' }}>
+                    Pipeline Runs ({runs.length})
+                </div>
+                {runs.length === 0 && <div style={{ padding: '16px 14px', fontSize: '0.78rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}>No runs yet.</div>}
+                {runs.map(r => (
+                    <div key={r.run_id} className={`pipeline-list-item ${selectedRun && selectedRun.run_id === r.run_id ? 'active' : ''}`} onClick={() => setSelectedRun(selectedRun && selectedRun.run_id === r.run_id ? null : r)}>
+                        <span className="pipeline-name">{r.pipeline}</span>
+                        <span className="pipeline-status" style={{ color: runStatusColor(r.status) }}>
+                            {r.status}{r.iteration ? ` · iter ${r.iteration}` : ''}{r.topic ? ` · ${r.topic.substring(0, 28)}${r.topic.length > 28 ? '…' : ''}` : ''}
+                        </span>
+                        {selectedRun && selectedRun.run_id === r.run_id && r.stop_reason && (
+                            <span className="pipeline-status">{r.stop_reason}</span>
+                        )}
+                    </div>
+                ))}
+            </div>
+            <div className="panel-page" style={{ flex: 1 }}>
+                <div className="panel-form">
+                    <div className="panel-form-header">Launch Pipeline</div>
+                    <div>
+                        <label className="panel-label">Pipeline</label>
+                        <select className="panel-select" value={pipeline} onChange={e => setPipeline(e.target.value)}>
+                            {PIPELINES.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="panel-label">Topic</label>
+                        <input
+                            type="text"
+                            className="panel-input"
+                            value={topic}
+                            onChange={e => setTopic(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && handleLaunch()}
+                            placeholder="e.g. AgentHire portal design patterns 2026"
+                        />
+                    </div>
+                    <button className="btn-primary" onClick={handleLaunch} disabled={loading} style={{ alignSelf: 'flex-start' }}>
+                        {loading ? 'Queuing...' : 'Start Pipeline'}
+                    </button>
+                </div>
             </div>
         </div>
     );

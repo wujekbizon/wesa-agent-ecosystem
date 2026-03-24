@@ -8,6 +8,7 @@ Pass use_web_search=True to enable dynamic tool-based retrieval via the Google S
 When disabled (default), the agent operates in standard mode without external tool calls.
 """
 import os
+import concurrent.futures
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -26,6 +27,7 @@ class GeminiAgent:
         use_web_search: bool = False,
         model_override: str | None = None,
     ):
+        self._timeout = int(os.getenv("GEMINI_TIMEOUT", "120"))
         self.client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
         
         # If model_override is provided and non-empty, use it.
@@ -40,7 +42,7 @@ class GeminiAgent:
         self.use_web_search = use_web_search
 
     def run(self, prompt: str) -> str:
-        try:
+        def _call():
             config_args = {
                 "system_instruction": self.system_prompt,
             }
@@ -52,6 +54,13 @@ class GeminiAgent:
                 config=types.GenerateContentConfig(**config_args),
             )
             return response.text.strip()
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_call)
+                return future.result(timeout=self._timeout)
+        except concurrent.futures.TimeoutError:
+            raise RuntimeError(f"{self.agent_name} error: timed out after {self._timeout}s")
         except Exception as e:
             raise RuntimeError(f"{self.agent_name} error: {e}")
 

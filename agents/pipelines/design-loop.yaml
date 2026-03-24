@@ -1,30 +1,39 @@
 name: design-loop
-description: "Automated design improvement loop. R1 research (once) → UX1 prototype → Q1 review → SU1 skill update → loops back to UX1 until Q1 scores 72/80 (9/10 avg) or max iterations reached."
+description: "Automated design improvement loop. R1 research (once, 3 ranked directions) → UX1 picks most original direction and prototypes → Q1 review → SU1 skill update → loops back to UX1 until Q1 scores 72/80 (9/10 avg) or max iterations reached."
 trigger: manual
 stages:
   - id: research
     agent: r1
     task_type: research
     prompt_template: |
-      Research the most innovative and distinctive UI/UX design direction for: {topic}
+      Research the most innovative and distinctive UI/UX design directions for: {topic}
 
       Survey the full spectrum of human design work with no restrictions on domain — digital products,
       game interfaces, financial terminals, scientific visualization, industrial systems, broadcast
       production, data art, physical product UI, emerging studios, or anything producing genuinely
-      excellent and original results in 2026. Look for what is surfacing now, not what was mainstream
+      excellent and original results in 2026. Look for what is surfacing NOW, not what was mainstream
       in 2022-2024.
 
-      Choose the single most compelling direction you find. Your output will be used directly as the
-      creative brief for a senior designer, so it must be specific enough to commit to fully.
+      HARD BLACKLIST — do not propose any of the following directions. They are exhausted clichés:
+      - Cyberpunk / HUD dashboard / telemetry panel aesthetics
+      - Web3 / crypto / glassmorphism dark mode
+      - Bento grid / neo-brutalism
+      - Flat minimalism with a single accent color
+      - Any variation of "computational fluid dynamics" or "data visualization terminal"
+      If your research leads you toward any of these, discard and keep searching.
 
-      Output a structured design brief:
-      1. Direction name — sharp and specific (e.g. "Broadcast Control Room", "Computational Fluid Dynamics UI")
-      2. Inspiration source — domain and specific examples this draws from
-      3. Why this direction fits the product being designed
-      4. Color palette — hex values, one semantic role per color
-      5. Typography stack — specific Google Fonts, justification for each
-      6. Layout principle — dominant structural approach and information density
-      7. Two concrete UI patterns borrowed directly from the inspiration source
+      Output exactly 3 distinct directions, ranked by ORIGINALITY (most original first).
+      Each direction must come from a genuinely different domain of inspiration.
+
+      For each direction output:
+      DIRECTION [1|2|3] — [sharp specific name]
+      Originality score: [X/10] — [one sentence on why this feels fresh in 2026]
+      1. Inspiration source — domain and specific examples
+      2. Why this direction fits the product
+      3. Color palette — hex values, one semantic role per color
+      4. Typography stack — specific Google Fonts, justification for each
+      5. Layout principle — dominant structural approach and information density
+      6. Two concrete UI patterns borrowed directly from the inspiration source
     output_file: null
 
   - id: design
@@ -33,7 +42,7 @@ stages:
     prompt_template: |
       Design task: {topic} — Iteration {iteration}
 
-      CREATIVE DIRECTION (R1 research brief — your committed visual language):
+      R1 RESEARCH — THREE RANKED DIRECTIONS:
       {stage.research}
 
       Q1 FEEDBACK FROM PREVIOUS ITERATION:
@@ -43,8 +52,7 @@ stages:
       {read_file:WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md}
 
       INSTRUCTIONS:
-      - Execute the R1 brief fully: use its exact color palette, typography stack, layout principle, and UI patterns. Do not substitute or generalise.
-      - Iteration 1 (no Q1 feedback above): produce a fresh, fully realized prototype built entirely from the R1 brief.
+      - Iteration 1 (no Q1 feedback above): R1 has provided 3 ranked directions above. Select DIRECTION 1 (highest originality score). Commit to it fully — use its exact color palette, typography stack, layout principle, and UI patterns. Do not blend directions or substitute. Produce a fresh, fully realized prototype.
       - Iteration 2+ (Q1 feedback present): DO NOT restart or change design direction. Keep the creative direction, visual identity, color palette, and overall concept intact. Address only Q1's specific failures listed under "What Failed". Raise the floor — do not move the ceiling.
       - Apply all accumulated tips above — they represent everything Q1 has flagged across prior iterations of this run.
       - Output: complete single-file HTML only. No explanation text before or after.

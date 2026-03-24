@@ -35,6 +35,7 @@ import json
 import uuid
 import re
 import yaml
+import subprocess
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -58,6 +59,7 @@ POLL_INTERVAL = 3
 RC_INTERVAL_HOURS = int(os.environ.get("RC_INTERVAL_HOURS", "4"))
 RC_SCHEDULE_FILE = LOGS_DIR / "rc_schedule.json"
 RC_PIPELINE_NAME = "research-center"
+RC_ENABLED_FILE = LOGS_DIR / "rc_enabled.flag"  # exists = enabled, absent = disabled
 
 # Route task type → log subfolder
 TASK_TYPE_LOG_DIR = {
@@ -73,8 +75,12 @@ TASK_TYPE_LOG_DIR = {
     "write":        LOGS_DEV_DIR,
     "test":         LOGS_DEV_DIR,
     "assets":       LOGS_DEV_DIR,
+    "git":          LOGS_DEV_DIR,
     "general":      LOGS_DEV_DIR,
 }
+
+# Git repo root: the agent-ecosystem folder (where daemon.py lives)
+REPO_DIR = Path(__file__).parent
 
 # Workspace root: three levels up from daemon.py = Coworker/
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -196,6 +202,101 @@ def strip_code_fences(text: str) -> str:
     return text.strip()
 
 
+# --- Git context enrichment (v0.8) ---
+
+def _run_git(args: list, cwd: Path, max_lines: int = 300) -> str:
+    """Run a git command, return stdout capped at max_lines."""
+    try:
+        result = subprocess.run(
+            ["git"] + args,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+        output = (result.stdout or "").strip()
+        if not output:
+            return (result.stderr or "").strip() or "(no output)"
+        lines = output.splitlines()
+        if len(lines) > max_lines:
+            return "\n".join(lines[:max_lines]) + f"\n... [{len(lines) - max_lines} lines truncated]"
+        return output
+    except FileNotFoundError:
+        return "(git not found in PATH)"
+    except Exception as e:
+        return f"(git command failed: {e})"
+
+
+def execute_git_block(result: str, cwd: Path) -> tuple[bool, str]:
+    """
+    Parse G1's output for git add/commit lines and execute them.
+    Handles both bare lines and lines inside markdown code fences.
+    Returns (success, summary_message).
+    """
+    # Strip markdown code fences so we can scan inside them too
+    clean = re.sub(r'```[^\n]*\n', '', result)
+    clean = clean.replace('```', '')
+    lines = [l.strip() for l in clean.splitlines()]
+    commands = [
+        l for l in lines
+        if l.startswith("git add ") or l.startswith("git commit -m ")
+    ]
+
+    if not commands:
+        return False, "No git commands found in G1 output — nothing executed."
+
+    executed = []
+    for cmd in commands:
+        parts = cmd.split(None, 1)  # split on first space only for "git"
+        args = cmd[len("git "):].strip()  # everything after "git "
+        # Build proper args list
+        if args.startswith("add "):
+            git_args = ["add", args[4:].strip()]
+        elif args.startswith("commit -m "):
+            # Extract the message — may be quoted
+            msg_raw = args[len("commit -m "):].strip().strip('"').strip("'")
+            git_args = ["commit", "-m", msg_raw]
+        else:
+            continue
+
+        out = _run_git(git_args, cwd)
+        log(f"[G1 exec] git {' '.join(git_args[:2])} → {out[:80]}")
+        executed.append(f"git {' '.join(git_args)}")
+
+        # If commit failed, stop
+        if git_args[0] == "commit" and "nothing to commit" in out.lower():
+            return False, f"Commit skipped — nothing staged. Commands run: {len(executed)}"
+
+    return True, f"Executed {len(executed)} git commands:\n" + "\n".join(f"  {c}" for c in executed)
+
+
+def enrich_git_prompt(task: Task) -> None:
+    """
+    Auto-inject live git context into a git task prompt before routing to G1.
+    G1 receives git status + diff + recent log automatically — Greg just submits
+    an empty prompt or a brief note, no need to copy-paste diffs manually.
+    """
+    status  = _run_git(["status", "--short"], REPO_DIR)
+    diff    = _run_git(["diff", "HEAD", "--", "."], REPO_DIR, max_lines=400)
+    recent  = _run_git(["log", "--oneline", "-5"], REPO_DIR)
+
+    context = (
+        f"=== AUTO-INJECTED GIT CONTEXT ({REPO_DIR.name}) ===\n\n"
+        f"### git status --short\n{status}\n\n"
+        f"### git log --oneline -5\n{recent}\n\n"
+        f"### git diff HEAD\n{diff}\n\n"
+        f"=== END GIT CONTEXT ===\n\n"
+    )
+
+    notes = task.prompt.strip()
+    task.prompt = context + (
+        f"### Notes from Greg:\n{notes}" if notes
+        else "### Notes from Greg:\n(none — analyze the diff and generate the commit block)"
+    )
+
+
 # --- Retry logic (v0.7) ---
 
 RETRY_DELAYS = [30, 60, 120]  # seconds between retry attempts
@@ -269,9 +370,12 @@ def _rc_pipeline_running(pipeline_ctrl: PipelineController) -> bool:
 def auto_run_research_center(pipeline_ctrl: PipelineController, queue: TaskQueue):
     """
     Called on every daemon poll. Fires the next RC topic when:
+    - RC_ENABLED_FILE exists (scheduler is on)
     - No RC pipeline is currently running
     - At least RC_INTERVAL_HOURS have passed since last trigger
     """
+    if not RC_ENABLED_FILE.exists():
+        return
     # Load RC pipeline definition to get topics list
     rc_yaml_path = pipeline_ctrl.pipelines_dir / f"{RC_PIPELINE_NAME}.yaml"
     if not rc_yaml_path.exists():
@@ -382,6 +486,12 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
 
     log(f"Processing task {task.id} [{task.type}] ...")
     task.status = TaskStatus.IN_PROGRESS
+
+    # Auto-enrich git tasks: inject live git status + diff before routing to G1
+    if task_type_str == "git":
+        log(f"Task {task.id} [git] — injecting live git context from {REPO_DIR.name}")
+        enrich_git_prompt(task)
+
     task.save(task_path)
     queue.update_status(task.id, "in_progress")
 
@@ -417,6 +527,15 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
 
         update_briefing(queue)
         log(f"Task {task.id} DONE via {model_used}")
+
+        # Auto-execute git commands from G1 output
+        if task_type_str == "git":
+            success, summary = execute_git_block(result, REPO_DIR)
+            log(f"[G1 exec] {'OK' if success else 'SKIPPED'}: {summary.splitlines()[0]}")
+            task.result = result + f"\n\n---\n**Auto-executed**: {summary}"
+            task.save(task_path)
+            queue.update_status(task.id, "done", result=task.result, model_used=model_used)
+
         notify_done(task.id, task.type, model_used)
 
         # Advance pipeline if this task belongs to one

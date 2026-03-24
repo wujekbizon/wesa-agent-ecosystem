@@ -1,0 +1,10 @@
+- Ensure all critical text remains legible and accessible regardless of background elements (dynamic, interactive, or busy patterns) or user interaction states, preventing visual interference.
+- Implement symmetrical horizontal constraints (padding or margins) on primary layout wrappers to ensure content is equally protected from both viewport edges and maintains balance across screen sizes.
+- All elements, whether decorative or functional, and irrespective of their z-index or positioning strategy, must conform to the underlying grid system to maintain structural integrity and visual harmony. Specifically, avoid mixing absolute positioning with CSS Grid column definitions, as this can lead to unpredictable layouts.
+- Group related interactive elements, especially call-to-action buttons, into a single cohesive visual block to clarify interaction hierarchy and maintain layout integrity.
+- Maintain strict consistency across all component variants and interactive states, adhering to the defined design system for both physical properties (e.g., padding, dimensions) and visual styling (e.g., color, opacity, borders) to ensure predictable user interaction and system integrity.
+- Avoid using fixed pixel dimensions (`width: Xpx`, `height: Ypx`) on primary structural elements; instead, utilize fluid units, aspect ratios, and responsive constraints to ensure adaptability across diverse viewports.
+- Reserve highly stylized typographic treatments (e.g., uppercase with wide letter-spacing) for specific, limited hierarchical roles (e.g., labels, tags) to preserve overall readability and scannability.
+- Validate contrast ratios independently for display headers versus functional micro-copy, as different text sizes and roles require distinct legibility evaluations.
+- Align the stylistic and historical connotations of chosen typefaces with the product's brand identity, content, and emotional register to avoid cognitive dissonance.
+- Avoid using reduced opacity to denote typographic emphasis, as it can weaken visual hierarchy and imply a disabled or secondary state rather than importance.
