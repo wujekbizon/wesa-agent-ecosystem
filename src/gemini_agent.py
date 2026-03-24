@@ -53,6 +53,8 @@ class GeminiAgent:
                 contents=prompt,
                 config=types.GenerateContentConfig(**config_args),
             )
+            if response.text is None:
+                raise RuntimeError("Gemini returned no text content (possible safety block or invalid model name)")
             return response.text.strip()
 
         try:

@@ -46,6 +46,8 @@ class Router:
             self._agents[skill.name] = OllamaAgent(
                 system_prompt=skill.system_prompt,
                 agent_name=skill.name,
+                model_override=skill.ollama_model or None,
+                ollama_options=skill.ollama_options or None,
             )
         else:
             if use_web_search:

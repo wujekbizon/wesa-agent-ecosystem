@@ -27,6 +27,8 @@ class AgentSkill:
     system_prompt: str
     use_web_search: bool = False
     gemini_model: str = ""  # Optional per-agent Gemini model override (e.g. "gemini-3.1-pro-preview")
+    ollama_model: str = ""  # Optional per-agent Ollama model override
+    ollama_options: dict = field(default_factory=dict)  # Optional Ollama params (num_ctx, temperature, top_p)
 
 
 def validate_skill(data: dict[str, Any], filepath: str) -> tuple[bool, str]:
@@ -111,6 +113,8 @@ def load_skills(skills_dir: Path = SKILLS_DIR) -> dict[str, AgentSkill]:
             system_prompt=data["system_prompt"].strip(),
             use_web_search=bool(data.get("use_web_search", False)),
             gemini_model=str(data.get("gemini_model", "")),
+            ollama_model=str(data.get("ollama_model", "")),
+            ollama_options=dict(data.get("ollama_options") or {}),
         )
         for task_type in skill.task_types:
             skills[task_type] = skill

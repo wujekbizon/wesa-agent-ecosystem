@@ -15,29 +15,39 @@ DEFAULT_SYSTEM_PROMPT = """You are a WESA developer agent. Write clean, producti
 Follow best practices. Return only code and brief explanations."""
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:35b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "")
 _timeout_env = os.getenv("OLLAMA_TIMEOUT", "0")
 OLLAMA_TIMEOUT = None if _timeout_env == "0" else int(_timeout_env)
 
 
 class OllamaAgent:
-    def __init__(self, system_prompt: str = DEFAULT_SYSTEM_PROMPT, agent_name: str = "OllamaAgent"):
+    def __init__(
+        self,
+        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        agent_name: str = "OllamaAgent",
+        model_override: str | None = None,
+        ollama_options: dict | None = None,
+    ):
         self.host = OLLAMA_HOST
-        self._model = OLLAMA_MODEL
+        self._model = model_override or OLLAMA_MODEL
         self.system_prompt = system_prompt
         self.agent_name = agent_name
+        self._options = ollama_options or {}
 
     def run(self, prompt: str) -> str:
         try:
+            payload: dict = {
+                "model": self._model,
+                "system": self.system_prompt,
+                "prompt": prompt,
+                "stream": False,
+                "think": False,
+            }
+            if self._options:
+                payload["options"] = self._options
             response = requests.post(
                 f"{self.host}/api/generate",
-                json={
-                    "model": self._model,
-                    "system": self.system_prompt,
-                    "prompt": prompt,
-                    "stream": False,
-                    "think": False,
-                },
+                json=payload,
                 timeout=OLLAMA_TIMEOUT,
             )
             response.raise_for_status()

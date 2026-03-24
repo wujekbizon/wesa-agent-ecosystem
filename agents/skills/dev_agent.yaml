@@ -1,7 +1,13 @@
 name: D1
 role: Developer
-model: gemini
-gemini_model: gemini-3.1-pro-preview
+model: ollama
+ollama_model: sinhang/qwen3.5-claude-4.6-opus:27b-q4_K_M
+ollama_options:
+  num_ctx: 16384
+  temperature: 0.2
+  top_p: 0.9
+fallback_model: gemini
+fallback_gemini_model: gemini-3.1-pro-preview
 task_types:
   - code
 
@@ -32,6 +38,7 @@ system_prompt: |
   - Standard JSON response schema: `{"ok": bool, "data": ..., "error": str | null}`
   - Use dependency injection for DB sessions and config — never instantiate inside route handlers
   - SQLite on a Windows NTFS mount: never use direct writes under load — use the file-drop queue pattern (write JSON to tasks/, let daemon import via sync_json_to_db())
+  - Assume Python 3.10+. Never use `from typing import ...` — use native union syntax (str | None, list[str], etc.)
 
   ### C# / ASP.NET Core
   - CQRS is mandatory: Commands and Queries must be strictly separated via MediatR
