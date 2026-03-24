@@ -6,63 +6,117 @@ stages:
     agent: r1
     task_type: research
     prompt_template: |
-      Research current UI/UX design trends and best practices for: {topic}
-      Focus on: layout patterns, visual hierarchy, color strategy, typography, interaction design, and what makes this specific product type feel premium vs generic.
-      Reference relevant best-in-class products as inspiration (e.g. Linear, Vercel, Stripe, Loom, Notion — pick what fits the topic).
-      Output a structured design brief: top 3 layout patterns, recommended color palette (hex values), typography stack, key interaction patterns, and specific design opportunities for this product.
+      Research the most innovative and distinctive UI/UX design direction for: {topic}
+
+      Survey the full spectrum of human design work with no restrictions on domain — digital products,
+      game interfaces, financial terminals, scientific visualization, industrial systems, broadcast
+      production, data art, physical product UI, emerging studios, or anything producing genuinely
+      excellent and original results in 2026. Look for what is surfacing now, not what was mainstream
+      in 2022-2024.
+
+      Choose the single most compelling direction you find. Your output will be used directly as the
+      creative brief for a senior designer, so it must be specific enough to commit to fully.
+
+      Output a structured design brief:
+      1. Direction name — sharp and specific (e.g. "Broadcast Control Room", "Computational Fluid Dynamics UI")
+      2. Inspiration source — domain and specific examples this draws from
+      3. Why this direction fits the product being designed
+      4. Color palette — hex values, one semantic role per color
+      5. Typography stack — specific Google Fonts, justification for each
+      6. Layout principle — dominant structural approach and information density
+      7. Two concrete UI patterns borrowed directly from the inspiration source
     output_file: null
 
   - id: design
     agent: ux1
     task_type: design
     prompt_template: |
-      ## Design task: {topic} — Iteration {iteration}
+      Design task: {topic} — Iteration {iteration}
 
-      ## Research brief:
+      CREATIVE DIRECTION (R1 research brief — your committed visual language):
       {stage.research}
 
-      ## Quality notes from previous review (blank on first pass — use as design principles, not a patch list):
+      Q1 FEEDBACK FROM PREVIOUS ITERATION:
       {stage.review}
 
-      ---
+      ACCUMULATED DESIGN TIPS FROM THIS RUN (built up by SU1 after each Q1 review):
+      {read_file:WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md}
 
-      Create a complete, polished single-file HTML/CSS/JS prototype for: {topic}
-
-      Rules:
-      - This is a FRESH design — do not replicate or patch the previous iteration
-      - Treat the quality notes above as design principles to raise the bar, not a bug list to fix
-      - Design exactly what is described — not a generic dashboard, not a template
-      - The layout, sections, copy, and interactions must serve this specific product
-      Output: complete HTML file only, no explanation text.
+      INSTRUCTIONS:
+      - Execute the R1 brief fully: use its exact color palette, typography stack, layout principle, and UI patterns. Do not substitute or generalise.
+      - Iteration 1 (no Q1 feedback above): produce a fresh, fully realized prototype built entirely from the R1 brief.
+      - Iteration 2+ (Q1 feedback present): DO NOT restart or change design direction. Keep the creative direction, visual identity, color palette, and overall concept intact. Address only Q1's specific failures listed under "What Failed". Raise the floor — do not move the ceiling.
+      - Apply all accumulated tips above — they represent everything Q1 has flagged across prior iterations of this run.
+      - Output: complete single-file HTML only. No explanation text before or after.
     output_file: "WesaTeam/agent-ecosystem/static/designs/{run_id}_v{iteration}_prototype.html"
 
   - id: review
     agent: q1
     task_type: review
     prompt_template: |
-      You are Q1, a senior design critic. Score this HTML prototype for: {topic}
+      You are Q1 — an independent design critic, not part of the team that built this.
+      Your job is to assess quality with the same rigour a senior creative director would bring to a portfolio review.
+      You have no stake in this work. You call it as you see it.
+
+      Score this HTML prototype for: {topic}
 
       Score on 8 dimensions, each 0-10:
-      Visual Hierarchy, Color & Contrast, Typography, Layout & Spacing, Component Consistency, Craft & Finish, Originality, Emotional Register
+      Visual Hierarchy, Color & Contrast, Typography, Layout & Spacing,
+      Component Consistency, Craft & Finish, Originality, Emotional Register
 
       For each dimension: score + 2-sentence justification.
+      Then: a "What Worked" section (top 3 genuine strengths) and a "What Failed" section (top 3 failures, specific).
       End with: TOTAL SCORE: X/80 and TOP 3 IMPROVEMENTS (specific and actionable).
+      Also include: SKILL UPDATE RECOMMENDATIONS — 1-3 universal rules SU1 should add to UX1's skill file.
 
       Prototype HTML:
       {prev_output}
     output_file: "WesaTeam/agent-ecosystem/logs/designs/{run_id}_v{iteration}_review.md"
-    loop_to: design
-    stop_if: "score >= 72"
 
   - id: skill_update
     agent: su1
     task_type: skill_update
     prompt_template: |
-      A design-loop has completed after {iteration} iterations. Update agents/skills/ux_agent.yaml with the key lessons learned.
-      Focus only on universal design principles from the TOP 3 IMPROVEMENTS — do not add product-specific rules.
-      Improve the skill to produce better designs in future runs without bloating or contradicting existing rules.
+      Q1 reviewed iteration {iteration} of run {run_id}.
+      Your job: update the run-scoped overlay file — DO NOT touch ux_agent.yaml.
 
-      Final Q1 Review:
+      The overlay is a cumulative list of universal design tips UX1 reads on every iteration of this run.
+      Extract universal design principles from Q1's SKILL UPDATE RECOMMENDATIONS.
+      Merge with any existing overlay tips below — do not duplicate, do not add product-specific rules.
+      Keep it tight: max 10 tips total, most impactful only.
+
+      Previous overlay (empty on iteration 1 means start fresh):
+      {read_file:WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md}
+
+      Q1 Review:
+      {stage.review}
+
+      Output: ONLY the updated overlay as a markdown list. No YAML. No explanations. Just the tips.
+    output_file: "WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md"
+    loop_to: design
+    stop_if: "score >= 72"
+
+  - id: skill_merge
+    agent: su1
+    task_type: skill_merge
+    prompt_template: |
+      A design for "{topic}" was approved after {iteration} iterations (score >= 72/80).
+      Your job: permanently merge the run's accumulated tips into ux_agent.yaml.
+
+      Rules:
+      - Only merge rules that are universal — apply to any UI design, not just this product
+      - Merge with existing content — do not bloat, do not duplicate
+      - If a new tip overlaps an existing rule, sharpen the existing one instead of adding
+      - Do NOT change name, role, model, or task_types fields
+      - Output the COMPLETE updated ux_agent.yaml — valid YAML starting with: name: UX1
+
+      Current ux_agent.yaml:
+      {read_file:WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml}
+
+      Accumulated run tips (all {iteration} iterations of this run):
+      {read_file:WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md}
+
+      Winning Q1 review (the review that crossed 72/80):
       {stage.review}
     output_file: "WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml"
 

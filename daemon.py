@@ -64,7 +64,9 @@ TASK_TYPE_LOG_DIR = {
     "design":       LOGS_DESIGNS_DIR,
     "frontend":     LOGS_DESIGNS_DIR,
     "review":       LOGS_DESIGNS_DIR,
+    "code_review":  LOGS_DEV_DIR,
     "skill_update": LOGS_DESIGNS_DIR,
+    "skill_merge":  LOGS_DESIGNS_DIR,
     "research":     LOGS_RESEARCH_DIR,
     "analyze":      LOGS_RESEARCH_DIR,
     "code":         LOGS_DEV_DIR,
@@ -208,30 +210,9 @@ def is_transient_error(e: Exception) -> bool:
     ])
 
 
-def queue_axel_skill_update(review_task: Task, queue: TaskQueue):
-    """After a Q1 review completes, queue SU1 to update ux_agent.yaml."""
-    try:
-        review_content = review_task.result or ""
-        skill_path = WORKSPACE_ROOT / "WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml"
-        current_skill = skill_path.read_text(encoding="utf-8") if skill_path.exists() else ""
-
-        su1_id = f"su1-skill-{uuid.uuid4().hex[:6]}"
-        su1_task = Task(
-            id=su1_id,
-            type="skill_update",
-            prompt=(
-                f"A Q1 design review has just completed. Update the UX1 skill based on the findings.\n\n"
-                f"--- Q1 REVIEW ---\n{review_content}\n\n"
-                f"--- CURRENT ux_agent.yaml ---\n{current_skill}"
-            ),
-            output_file="WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml",
-        )
-        task_path = TASKS_DIR / f"{su1_id}.json"
-        su1_task.save(task_path)
-        queue.import_task(json.loads(su1_task.to_json()))
-        log(f"SU1 skill-update task queued: {su1_id}")
-    except Exception as e:
-        log(f"Failed to queue Axel skill update: {e}")
+    # NOTE: SU1 skill updates are now handled exclusively by the design-loop pipeline's
+    # skill_update stage. Removed standalone queue_axel_skill_update() hook to prevent
+    # double SU1 execution (pipeline stage + daemon hook both firing after every Q1 review).
 
 
 def parse_pipeline_trigger(prompt: str):
@@ -329,6 +310,51 @@ def auto_run_research_center(pipeline_ctrl: PipelineController, queue: TaskQueue
         log(f"[RC Auto] Failed to start pipeline: {e}")
 
 
+def append_pipeline_notification(completion: dict):
+    """Append a pipeline completion notice to AXEL_BRIEFING after update_briefing() runs."""
+    if not BRIEFING_FILE.exists():
+        return
+    stop_reason = completion.get("stop_reason", "completed")
+    run_id = completion.get("run_id", "?")
+    pipeline = completion.get("pipeline", "?")
+    topic = completion.get("topic", "")
+    iteration = completion.get("iteration", "?")
+    overlay_path = completion.get("overlay_path", "")
+
+    if stop_reason == "completed":
+        headline = "APPROVED — Skill merge complete"
+        detail = (
+            f"Design approved after {iteration} iteration(s).\n"
+            f"SU1 has permanently merged the run tips into `ux_agent.yaml`.\n"
+            f"**Action required**: Review `WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml` "
+            f"and correct any poor or product-specific rules SU1 may have introduced."
+        )
+    elif stop_reason == "max_iterations_reached":
+        headline = "MAX ITERATIONS — No merge"
+        detail = (
+            f"Design loop ran all {iteration} iterations without reaching 72/80.\n"
+            f"Review Q1 findings at `logs/designs/{run_id}_v*_review.md` to understand "
+            f"what kept scoring low. Consider updating the R1 or design prompts."
+        )
+    else:
+        headline = f"Pipeline ended — {stop_reason}"
+        detail = "Check pipeline state file for details."
+
+    notice = (
+        f"\n---\n\n"
+        f"## Pipeline Notification — {pipeline}\n\n"
+        f"**Status**: {headline}\n"
+        f"**Run ID**: `{run_id}`\n"
+        f"**Topic**: {topic}\n"
+        f"**Completed at**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"{detail}\n\n"
+        f"Overlay: `{overlay_path}`\n"
+        f"Q1 Reviews: `logs/designs/{run_id}_v*_review.md`\n"
+    )
+    with open(BRIEFING_FILE, "a", encoding="utf-8") as f:
+        f.write(notice)
+
+
 def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctrl: PipelineController):
     task = Task.from_file(task_path)
 
@@ -394,11 +420,11 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
         notify_done(task.id, task.type, model_used)
 
         # Advance pipeline if this task belongs to one
-        pipeline_ctrl.on_task_complete(task.id, result, queue)
+        completion = pipeline_ctrl.on_task_complete(task.id, result, queue)
 
-        # Post-completion hook: Q1 review → queue SU1 skill update
-        if task_type_str == "review" and task.output_file:
-            queue_axel_skill_update(task, queue)
+        # If a pipeline just finished and requested notification, append to AXEL_BRIEFING
+        if completion:
+            append_pipeline_notification(completion)
 
     except Exception as e:
         task.error = str(e)

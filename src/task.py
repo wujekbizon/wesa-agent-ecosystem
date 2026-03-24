@@ -21,9 +21,11 @@ class TaskType(str, Enum):
     DESIGN = "design"      # → Gemini (UX1 - UI/UX prototypes)
     FRONTEND = "frontend"  # → Gemini (FE1 - React 19, Next.js)
     TEST = "test"          # → Gemini (T1 - Playwright, testing)
-    REVIEW = "review"      # → Gemini (Q1 - QA, code review)
+    REVIEW = "review"      # → Gemini (Q1 - design critic, design reviews only)
+    CODE_REVIEW = "code_review"  # → Gemini (QA - code QA, logic errors, test generation)
     ASSETS = "assets"      # → Gemini (A1 - image gen via Nano Banana)
-    SKILL_UPDATE = "skill_update"  # → Gemini (SU1 - updates agent skills after Q1 review)
+    SKILL_UPDATE = "skill_update"  # → Gemini (SU1 - writes per-run overlay during design loop)
+    SKILL_MERGE = "skill_merge"    # → Gemini (SU1 - permanent merge to ux_agent.yaml on approval)
     MANAGE = "manage"              # → Gemini (PM1 - project manager, FE1+T1 loop)
     COORDINATE = "coordinate"      # → Gemini (PM1 - coordination tasks)
 

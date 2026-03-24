@@ -79,8 +79,10 @@ class PipelineController:
 
         return run_id
 
-    def on_task_complete(self, task_id: str, result: str, queue: TaskQueue) -> None:
-        """Call this from daemon after every task completion."""
+    def on_task_complete(self, task_id: str, result: str, queue: TaskQueue) -> Optional[dict]:
+        """Call this from daemon after every task completion.
+        Returns a completion dict if a pipeline just finished (and notify_on_complete is True),
+        otherwise returns None."""
         for state_file in list(self.running_dir.glob("*.json")):
             try:
                 with open(state_file, "r", encoding="utf-8") as f:
@@ -89,26 +91,28 @@ class PipelineController:
                 continue
 
             if state.get("status") == "running" and state.get("current_task_id") == task_id:
-                self._advance(state_file, state, result, queue)
-                return
+                return self._advance(state_file, state, result, queue)
+        return None
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
-    def _advance(self, state_file: Path, state: dict, result: str, queue: TaskQueue) -> None:
+    def _advance(self, state_file: Path, state: dict, result: str, queue: TaskQueue) -> Optional[dict]:
+        """Advance the pipeline one step. Returns completion dict if pipeline just finished
+        and notify_on_complete is True, otherwise None."""
         pipeline_name = state["pipeline"]
         if pipeline_name not in self._pipelines:
-            self._mark_done(state_file, state)
-            return
+            self._mark_done(state_file, state, "error_no_pipeline")
+            return None
 
         pipeline_def = self._pipelines[pipeline_name]
         stages = pipeline_def["stages"]
         current_idx = state["current_stage_index"]
 
         if current_idx >= len(stages):
-            self._mark_done(state_file, state)
-            return
+            self._mark_done(state_file, state, "error_stage_index_oob")
+            return None
 
         current_stage = stages[current_idx]
         stage_id = current_stage.get("id", f"stage_{current_idx}")
@@ -135,15 +139,13 @@ class PipelineController:
             # Loop: increment iteration, check cap, jump back
             state["iteration"] += 1
             if state["iteration"] > max_iter:
-                self._mark_done(state_file, state)
-                return
+                return self._complete(state_file, state, pipeline_def, "max_iterations_reached")
 
             target_idx = next(
                 (i for i, s in enumerate(stages) if s.get("id") == loop_to_id), -1
             )
             if target_idx == -1:
-                self._mark_done(state_file, state)
-                return
+                return self._complete(state_file, state, pipeline_def, "error_loop_target_not_found")
 
             state["current_stage_index"] = target_idx
             self._save_state(state_file, state)
@@ -151,13 +153,12 @@ class PipelineController:
             task_id = self._queue_stage(pipeline_name, stages[target_idx], state, prev, queue)
             state["current_task_id"] = task_id
             self._save_state(state_file, state)
-            return
+            return None
 
         # Advance to next stage
         next_idx = current_idx + 1
         if next_idx >= len(stages):
-            self._mark_done(state_file, state)
-            return
+            return self._complete(state_file, state, pipeline_def, "completed")
 
         state["current_stage_index"] = next_idx
         self._save_state(state_file, state)
@@ -165,20 +166,44 @@ class PipelineController:
         task_id = self._queue_stage(pipeline_name, stages[next_idx], state, prev, queue)
         state["current_task_id"] = task_id
         self._save_state(state_file, state)
+        return None
+
+    def _complete(self, state_file: Path, state: dict, pipeline_def: dict, stop_reason: str) -> Optional[dict]:
+        """Mark pipeline done and return notification dict if notify_on_complete is set."""
+        self._mark_done(state_file, state, stop_reason)
+        if pipeline_def.get("notify_on_complete"):
+            run_id = state["run_id"]
+            return {
+                "run_id": run_id,
+                "pipeline": state["pipeline"],
+                "topic": state.get("topic", ""),
+                "stop_reason": stop_reason,
+                "iteration": state.get("iteration", 1),
+                "overlay_path": f"WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md",
+            }
+        return None
 
     def _eval_stop_if(self, stop_if: str, result: str, state: dict = None) -> bool:
         """Evaluates stop_if expression like 'score >= 72' against result text.
-        If TOTAL SCORE not found in current result, falls back to checking the
-        'review' stage output in state (for use on skill_update stage)."""
+        Searches for any numeric score out of 80 (e.g. '63.0 / 80', '62/80',
+        'TOTAL SCORE: 64 / 80'). Falls back to the 'review' stage output in
+        state when not found in the current result (used on skill_update stage)."""
         if not stop_if:
             return False
-        match = re.search(r"TOTAL SCORE:\s*(\d+)", result)
-        if not match and state:
+
+        def _extract_score(text: str):
+            # Match any number (int or float) immediately before /80 with optional spaces
+            m = re.search(r"(\d+(?:\.\d+)?)\s*/\s*80", text, re.IGNORECASE)
+            if m:
+                return int(float(m.group(1)))
+            return None
+
+        score = _extract_score(result)
+        if score is None and state:
             review_output = state.get("stage_outputs", {}).get("review", "")
-            match = re.search(r"TOTAL SCORE:\s*(\d+)", review_output)
-        if not match:
+            score = _extract_score(review_output)
+        if score is None:
             return False
-        score = int(match.group(1))
         parts = stop_if.split()
         if len(parts) < 3:
             return False
@@ -212,6 +237,16 @@ class PipelineController:
         # Clear any {stage.*} placeholders for stages not yet run (e.g. {stage.review} on iteration 1)
         prompt = re.sub(r"\{stage\.[^}]+\}", "", prompt)
 
+        # Substitute {read_file:<path>} with file contents (path relative to workspace_root)
+        for match in re.finditer(r"\{read_file:([^}]+)\}", prompt):
+            rel_path = match.group(1).strip()
+            full_path = self.workspace_root / rel_path
+            try:
+                file_content = full_path.read_text(encoding="utf-8")
+            except (FileNotFoundError, OSError):
+                file_content = f"[File not found: {rel_path}]"
+            prompt = prompt.replace(match.group(0), file_content)
+
         # Map stage task_type string to TaskType enum
         type_str = stage.get("task_type", "general")
         try:
@@ -229,7 +264,7 @@ class PipelineController:
             type=task_type,
             output_file=output_file,
         )
-        task.id = f"{state['run_id']}-{stage.get('id', 'stage')}"
+        task.id = f"{state['run_id']}-{stage.get('id', 'stage')}-iter{state.get('iteration', 1)}"
 
         task_file = self.tasks_dir / f"{task.id}.json"
         task_file.write_text(
@@ -254,8 +289,9 @@ class PipelineController:
     def _save_state(self, state_file: Path, state: dict) -> None:
         state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    def _mark_done(self, state_file: Path, state: dict) -> None:
+    def _mark_done(self, state_file: Path, state: dict, stop_reason: str = "completed") -> None:
         state["status"] = "done"
+        state["stop_reason"] = stop_reason
         state["ended_at"] = datetime.now().isoformat()
         self._save_state(state_file, state)
-        print(f"[PipelineController] Pipeline '{state['pipeline']}' run '{state['run_id']}' complete.")
+        print(f"[PipelineController] Pipeline '{state['pipeline']}' run '{state['run_id']}' done — {stop_reason}.")

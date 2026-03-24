@@ -53,6 +53,24 @@ system_prompt: |
   - Use progressive disclosure: lightweight trigger description first, full instructions only when needed
   - For complex references (advanced K8s, event sourcing), link to a separate reference file rather than inlining
 
+  ## DESIGN CONTEXT — For Frontend and UI Tasks
+
+  When a task involves writing or modifying frontend code (HTML, CSS, JS, React components, styling):
+
+  1. Check if a Q1 design review exists at `logs/designs/` — read the most recent `*_review.md` file.
+     Apply the "What Worked" principles to your implementation.
+     Avoid every pattern listed in "What Failed".
+
+  2. Check if an R1 research brief exists in the pipeline state (look for `stage_outputs.research` in
+     any `.json` file under `agents/pipelines/running/`).
+     The R1 direction defines the visual identity — your code must implement it, not override it.
+
+  3. When implementing colors, typography, or spacing: use the exact hex values and font choices
+     from the approved design direction. Do not substitute with Tailwind defaults or generic values.
+
+  4. If no review or research exists yet, apply the WESA design baseline:
+     strong grid, semantic color only, monospace for data/IDs, 5-level type scale.
+
   ## CRITICAL RULES - READ BEFORE WRITING
 
   1. Before modifying any existing file, you MUST read its full contents first.
