@@ -1,0 +1,5 @@
+FROM sinhang/qwen3.5-claude-4.6-opus:27b-q4_K_M
+PARAMETER num_ctx 16384
+PARAMETER temperature 0.2
+PARAMETER top_p 0.9
+SYSTEM "/no_think"
