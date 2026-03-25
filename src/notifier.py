@@ -21,7 +21,8 @@ def _send_ntfy(title: str, message: str) -> None:
         return
     try:
         url = f"https://ntfy.sh/{topic}"
-        data = message.encode("utf-8")
+        # Prefix body so the inbound listener can filter own echoes with a single check
+        data = f"[daemon] {message}".encode("utf-8")
         req = urllib.request.Request(url, data=data, method="POST")
         req.add_header("Title", title)
         req.add_header("Priority", "default")

@@ -580,6 +580,16 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(strip_code_fences(result), encoding="utf-8")
             log(f"Output written to {output_path}")
+        elif task_type_str == "design":
+            # Standalone design task (no output_file set) — auto-save to static/designs/
+            # so it appears in the Designs tab alongside pipeline prototypes.
+            auto_path = WORKSPACE_ROOT / "WesaTeam" / "agent-ecosystem" / "static" / "designs" / f"{task.id}_prototype.html"
+            auto_path.parent.mkdir(parents=True, exist_ok=True)
+            auto_path.write_text(strip_code_fences(result), encoding="utf-8")
+            task.output_file = f"WesaTeam/agent-ecosystem/static/designs/{task.id}_prototype.html"
+            task.save(task_path)
+            queue.update_status(task.id, "done", result=result, model_used=model_used)
+            log(f"[Design] Auto-saved to {auto_path}")
 
         update_briefing(queue)
         log(f"Task {task.id} DONE via {model_used}")
@@ -618,10 +628,8 @@ def make_ntfy_handler(queue: TaskQueue, logs_dir: Path):
         raw   = (msg.get("message") or "").strip()
         title = (msg.get("title")   or "").strip()
         # Ignore outbound daemon/axel-trigger notifications echoed back by ntfy
-        # Check both body and title — notify_failed/done put context in title, not body
-        if "[axel-trigger]" in raw or "Model:" in raw:
-            return
-        if any(t in title for t in ("Task Done:", "Task Failed:", "WESA Daemon", "Axel Session", "Pipeline:")):
+        # All daemon-sent bodies are prefixed [daemon], all axel-trigger bodies [axel-trigger]
+        if "[daemon]" in raw or "[axel-trigger]" in raw:
             return
         # Try command dispatch first (status, pause, stop, help, approve, retry)
         if dispatch_ntfy_command(raw, queue, logs_dir, notify):
@@ -699,6 +707,8 @@ def run():
                 auto_run_research_center(pipeline_ctrl, queue)
             except Exception as e:
                 log(f"[RC Auto] Scheduler error: {e}")
+            # Re-sync: pipeline/RC may have dropped new JSON files after the first sync
+            sync_json_to_db(queue)
             for task_file in sorted(TASKS_DIR.glob("*.json")):
                 try:
                     process_task(task_file, router, queue, pipeline_ctrl)
