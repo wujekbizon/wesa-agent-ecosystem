@@ -44,7 +44,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from src.task import Task, TaskStatus
 from src.router import Router
-from src.notifier import notify_done, notify_failed, notify_started, start_ntfy_listener
+from src.notifier import notify, notify_done, notify_failed, notify_started, start_ntfy_listener
+from src.ntfy_commands import dispatch as dispatch_ntfy_command
 from src.task_queue import TaskQueue
 from src.pipeline_controller import PipelineController
 from src.staging_queue import StagingQueue
@@ -78,6 +79,7 @@ TASK_TYPE_LOG_DIR = {
     "assets":       LOGS_DEV_DIR,
     "git":          LOGS_DEV_DIR,
     "general":      LOGS_DEV_DIR,
+    "axel":         LOGS_DEV_DIR,
 }
 
 # Git repo root: the agent-ecosystem folder (where daemon.py lives)
@@ -466,8 +468,42 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
     if task.status != TaskStatus.PENDING:
         return
 
-    # coordinate + START_PIPELINE tasks are consumed here — not sent to a worker
+    # axel tasks: run axel_trigger.py headlessly — consumed here, not sent to a worker
     task_type_str = str(task.type).replace("TaskType.", "")
+    if task_type_str == "axel":
+        message = task.prompt.strip() or "Axel, check inbox and proceed autonomously"
+        log(f"[axel] Launching headless Axel session: {message[:80]}")
+        task.status = TaskStatus.IN_PROGRESS
+        task.save(task_path)
+        queue.update_status(task.id, "in_progress")
+        try:
+            trigger_script = Path(__file__).parent / "axel_trigger.py"
+            result = subprocess.run(
+                [sys.executable, str(trigger_script), message],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=660,
+            )
+            summary = f"exit={result.returncode} | {(result.stdout or '')[-300:]}"
+            task.status = TaskStatus.DONE
+            task.result = summary
+        except Exception as e:
+            task.status = TaskStatus.FAILED
+            task.error = str(e)
+            summary = f"axel_trigger error: {e}"
+        task.completed_at = datetime.now().isoformat()
+        task.save(task_path)
+        if task.status == TaskStatus.DONE:
+            queue.update_status(task.id, "done", result=task.result)
+        else:
+            queue.update_status(task.id, "failed", error=task.error)
+        update_briefing(queue)
+        log(f"[axel] Session complete: {summary[:120]}")
+        return
+
+    # coordinate + START_PIPELINE tasks are consumed here — not sent to a worker
     if task_type_str == "coordinate" and task.prompt.startswith("START_PIPELINE:"):
         pipeline_name, topic = parse_pipeline_trigger(task.prompt)
         if pipeline_name:
@@ -557,28 +593,35 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
         log(f"Task {task.id} FAILED: {e}")
         notify_failed(task.id, str(e))
         
-def handle_ntfy_message(msg: dict) -> None:
-    raw = (msg.get("message") or "").strip()
-     # Ignore outbound daemon notifications echoed back by ntfy
-    if "Model:" in raw:
-        return
-    if ":" in raw:
-        prefix, _, rest = raw.partition(":")
-        task_type = prefix.strip().lower()
-        prompt    = rest.strip()
-    else:
-        task_type = "general"
-        prompt    = raw
-    task = {
-        "id":         f"ntfy-{uuid.uuid4().hex[:8]}",
-        "type":       task_type,
-        "prompt":     prompt,
-        "status":     "pending",
-        "created_at": datetime.now().isoformat(),
-    }
-    task_path = TASKS_DIR / f"{task['id']}.json"
-    task_path.write_text(json.dumps(task, indent=2), encoding="utf-8")
-    log(f"[ntfy] Task {task['id']} [{task_type}]: {prompt[:60]}")
+def make_ntfy_handler(queue: TaskQueue, logs_dir: Path):
+    """Return a closure that handles inbound ntfy messages with access to queue and logs_dir."""
+    def handle_ntfy_message(msg: dict) -> None:
+        raw = (msg.get("message") or "").strip()
+        # Ignore outbound daemon notifications echoed back by ntfy
+        if "Model:" in raw or "Task Done:" in raw or "Task Failed:" in raw:
+            return
+        # Try command dispatch first (status, pause, stop, help, approve, retry)
+        if dispatch_ntfy_command(raw, queue, logs_dir, notify):
+            return
+        # Not a command — create a task
+        if ":" in raw:
+            prefix, _, rest = raw.partition(":")
+            task_type = prefix.strip().lower()
+            prompt    = rest.strip()
+        else:
+            task_type = "general"
+            prompt    = raw
+        task = {
+            "id":         f"ntfy-{uuid.uuid4().hex[:8]}",
+            "type":       task_type,
+            "prompt":     prompt,
+            "status":     "pending",
+            "created_at": datetime.now().isoformat(),
+        }
+        task_path = TASKS_DIR / f"{task['id']}.json"
+        task_path.write_text(json.dumps(task, indent=2), encoding="utf-8")
+        log(f"[ntfy] Task {task['id']} [{task_type}]: {prompt[:60]}")
+    return handle_ntfy_message
 
 def run():
     setup_dirs()
@@ -608,10 +651,26 @@ def run():
     update_briefing(queue)
     
     ntfy_stop = threading.Event()
-    start_ntfy_listener(handle_ntfy_message, ntfy_stop)
+    ntfy_handler = make_ntfy_handler(queue, LOGS_DIR)
+    start_ntfy_listener(ntfy_handler, ntfy_stop)
 
     while True:
         try:
+            # Check stop flag (ntfy 'stop' command)
+            stop_flag = LOGS_DIR / "daemon_stop.flag"
+            if stop_flag.exists():
+                stop_flag.unlink()
+                log("[ntfy-cmd] Stop flag detected. Daemon stopping cleanly.")
+                break
+
+            # Check pause flag (ntfy 'pause' command) — spin until flag removed
+            pause_flag = LOGS_DIR / "daemon_pause.flag"
+            if pause_flag.exists():
+                log("[ntfy-cmd] Pause flag detected. Sleeping...")
+                while pause_flag.exists():
+                    time.sleep(POLL_INTERVAL)
+                log("[ntfy-cmd] Pause flag removed. Resuming.")
+
             sync_json_to_db(queue)
             try:
                 auto_run_research_center(pipeline_ctrl, queue)

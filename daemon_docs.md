@@ -169,6 +169,77 @@ After the agent responds, `execute_git_block()` parses the output for `git add` 
 
 ---
 
+## ntfy Integration
+
+The daemon integrates with [ntfy.sh](https://ntfy.sh) for two-way push notifications: outbound alerts when tasks complete or fail, and an inbound command channel that lets you control the daemon and submit tasks from your phone or any ntfy client.
+
+### Setup
+
+Set the `NTFY_TOPIC` environment variable before starting the daemon:
+
+```bash
+export NTFY_TOPIC=your-private-topic-name
+python daemon.py
+```
+
+Subscribe on your phone (iOS / Android ntfy app) or via `https://ntfy.sh/your-private-topic-name`.
+
+If `NTFY_TOPIC` is not set, all ntfy features are silently disabled — the daemon runs normally without them.
+
+### Outbound Notifications
+
+The daemon pushes a notification for the following events:
+
+| Event | Title | Message |
+|-------|-------|---------|
+| Daemon started | `WESA Daemon Started` | `Agent daemon v0.5 is running.` |
+| Task completed | `Task Done: <id>` | `Type: <type> \| Model: <model>` |
+| Task failed | `Task Failed: <id>` | Error message (truncated) |
+| Pipeline event | `Pipeline: <name>` | `Run <run_id> — <status>` |
+
+### Inbound Commands
+
+Send a message to your ntfy topic and the daemon will handle it within one poll cycle (≤ 3 seconds). Commands are case-insensitive.
+
+| Message | Action |
+|---------|--------|
+| `status` | Replies with queue counts, current sprint goal, and design loop score |
+| `pause` | Sets a pause flag — daemon finishes the current task then holds until you send `resume` |
+| `stop` | Sets a stop flag — daemon exits cleanly after the current task |
+| `help` | Replies with the command list |
+| `approve <run_id>` | Writes `logs/approvals/<run_id>.approve` — consumed by the design loop pipeline |
+| `retry <run_id>` | Writes `logs/approvals/<run_id>.retry` — consumed by the design loop pipeline |
+| `D1:<prompt>` | Creates a `code` task and dispatches it to D1 |
+| `R1:<prompt>` | Creates a `research` task and dispatches it to R1 |
+| `W1:<prompt>` | Creates a `write` task and dispatches it to W1 |
+| `<type>:<prompt>` | Creates a task of any valid type with the given prompt |
+
+Any message that does not match a reserved command and contains a `:` is treated as `type:prompt` and queued as a task. A message with no `:` is queued as a `general` task.
+
+**Status reply format (max 3 lines):**
+```
+Done:191 Failed:3 Pending:0
+Sprint: D1 Ollama worker live + AgentH
+Design: iter2 score=7.875
+```
+
+### Pause / Stop Flag Behaviour
+
+`pause` and `stop` work via flag files in `logs/`. The daemon checks for these at the top of every poll cycle, before processing any tasks.
+
+| Flag file | Behaviour |
+|-----------|-----------|
+| `logs/daemon_pause.flag` | Daemon spins in a sleep loop until the file is deleted, then resumes normally |
+| `logs/daemon_stop.flag` | Daemon deletes the flag and exits cleanly (same as Ctrl+C) |
+
+To resume after a pause, either delete the flag file manually or send `stop` to restart the daemon fresh.
+
+### Echo Filter
+
+The daemon ignores inbound messages that contain `Model:`, `Task Done:`, or `Task Failed:` — these are its own outbound notifications echoed back by ntfy when it is subscribed to its own topic.
+
+---
+
 ## Pipelines
 
 The `PipelineController` orchestrates multi-step workflows defined as YAML files in `agents/pipelines/`.
@@ -252,7 +323,8 @@ Read this file at the start of any session to restore full context on the ecosys
 | `src.task.Task` | Task data model and file I/O |
 | `src.task.TaskStatus` | Enum: `PENDING`, `IN_PROGRESS`, `DONE`, `FAILED` |
 | `src.router.Router` | Dispatches tasks to the correct agent |
-| `src.notifier` | Sends started / done / failed notifications |
+| `src.notifier` | Sends outbound push notifications; hosts the ntfy listener thread |
+| `src.ntfy_commands` | Dispatches reserved inbound ntfy commands (status, pause, stop, help, approve, retry) |
 | `src.task_queue.TaskQueue` | SQLite-backed task state store |
 | `src.pipeline_controller.PipelineController` | Manages multi-step pipeline execution |
 | `src.staging_queue.StagingQueue` | Staging buffer for Research Center briefs |
@@ -266,3 +338,4 @@ Read this file at the start of any session to restore full context on the ecosys
 | v0.5 | SQLite queue integrated (`logs/tasks.db`); `update_briefing()` reads from SQLite; output file paths resolved relative to workspace root |
 | v0.6 | `PipelineController` wired in; `StagingQueue` wired in; `START_PIPELINE:` prompt trigger added |
 | v0.7 | Automatic retry with exponential backoff for transient API errors (3 retries: 30s → 60s → 120s) |
+| v0.8 | ntfy bidirectional integration: inbound command dispatch (`ntfy_commands.py`), `make_ntfy_handler` closure, pause/stop flag checks in main loop |

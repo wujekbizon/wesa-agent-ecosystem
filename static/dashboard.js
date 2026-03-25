@@ -642,9 +642,22 @@ const DOCS = [
             { title: 'Daemon', body: 'daemon.py — polls tasks/ folder every 3s, imports JSON to SQLite, routes by task_type, executes via Router → GeminiAgent or OllamaAgent. No restart needed for new tasks — drop JSON and daemon picks up.' },
             { title: 'Task Queue', body: 'SQLite-backed (logs/tasks.db). JSON files in tasks/ are imported on every poll via sync_json_to_db(). Direct SQLite writes unreliable on Windows NTFS mount — always use JSON file drop.' },
             { title: 'Gemini Timeout', body: 'All Gemini calls wrapped in concurrent.futures with 120s hard timeout (GEMINI_TIMEOUT env var). Prevents tasks hanging forever on API stall.' },
-            { title: 'Notifications', body: 'ntfy.sh push to phone. Set NTFY_TOPIC in .env. Fires on: task done, task failed, daemon start, pipeline complete.' },
+            { title: 'Notifications (ntfy)', body: 'Set NTFY_TOPIC env var. Daemon pushes: task done, task failed, daemon started, pipeline complete. See the ntfy / Remote Control section for inbound commands.' },
             { title: 'Git rules', body: 'agent-ecosystem/ → GitHub (public, safe to push). All WesaTeam/ folders → LOCAL ONLY, confidential, never push. Axel stages files, Greg commits from Windows PowerShell.' },
             { title: 'output_file paths', body: 'Resolved relative to WORKSPACE_ROOT (Coworker/). Always prefix: WesaTeam/agent-ecosystem/<path> for ecosystem files. Never bare paths — they write to Coworker root.' },
+        ],
+    },
+    {
+        section: 'ntfy / Remote Control',
+        items: [
+            { title: 'Setup', body: 'Set NTFY_TOPIC=your-private-topic in .env before starting the daemon. Subscribe on your phone via the ntfy app (iOS / Android) or https://ntfy.sh/your-topic. If NTFY_TOPIC is not set, all ntfy features are silently disabled.' },
+            { title: 'Outbound — what the daemon pushes', body: '"WESA Daemon Started" on startup. "Task Done: <id>" with type + model on completion. "Task Failed: <id>" with error on failure. "Pipeline: <name>" with run ID + status on pipeline events.' },
+            { title: 'status', body: 'Send "status" to get a 3-line reply: queue counts (Done/Failed/Pending), current sprint goal (truncated to 40 chars), design loop iteration + Q1 score if active.' },
+            { title: 'pause / stop', body: 'Send "pause" — daemon finishes the current task, then holds until you delete logs/daemon_pause.flag (or restart). Send "stop" — daemon exits cleanly after the current task (same as Ctrl+C). Both are flag-file based and survive daemon restarts.' },
+            { title: 'help', body: 'Send "help" — daemon replies with the full command list.' },
+            { title: 'approve / retry', body: 'Send "approve <run_id>" or "retry <run_id>" — writes logs/approvals/<run_id>.approve (or .retry). Consumed by the design-loop pipeline as the human gate.' },
+            { title: 'Submitting tasks remotely', body: 'Any message matching "type:prompt" is queued as a task. Examples: "D1:add rate limiting to notifier.py" → code task to D1. "R1:competitor pricing for AI agent platforms" → research task to R1. "W1:draft changelog for v0.8" → write task to W1. A message with no colon is queued as a "general" task.' },
+            { title: 'Echo filter', body: 'The daemon ignores inbound messages containing "Model:", "Task Done:", or "Task Failed:" — these are its own outbound notifications echoed back by ntfy when subscribed to the same topic.' },
         ],
     },
 ];
