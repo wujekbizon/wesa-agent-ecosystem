@@ -473,6 +473,7 @@ const App = () => {
                 <button className={activeTab==='designs'   ?'active':''} onClick={() => setActiveTab('designs')}>Designs</button>
                 <button className={activeTab==='reviews'   ?'active':''} onClick={() => setActiveTab('reviews')}>Q1 Reviews</button>
                 <button className={activeTab==='pipelines' ?'active':''} onClick={() => setActiveTab('pipelines')}>Pipelines</button>
+                <button className={activeTab==='axellog'   ?'active':''} onClick={() => setActiveTab('axellog')}>Axel Log</button>
                 <button className={activeTab==='help'      ?'active':''} onClick={() => setActiveTab('help')}>Help</button>
             </div>
             {activeTab === 'tasks' && (
@@ -488,6 +489,7 @@ const App = () => {
             {activeTab === 'designs'   && <div className="main-content"><DesignsPanel addToast={addToast} /></div>}
             {activeTab === 'reviews'   && <div className="main-content"><ReviewsPanel /></div>}
             {activeTab === 'pipelines' && <div className="main-content"><PipelineLauncherPanel addToast={addToast} /></div>}
+            {activeTab === 'axellog'   && <div className="main-content" style={{ display:'flex', flexDirection:'column', padding:0 }}><AxelLogPanel /></div>}
             {activeTab === 'help'      && <div className="main-content"><HelpPanel /></div>}
             <Toast toasts={toasts} onRemoveToast={removeToast} />
         </>
@@ -761,6 +763,69 @@ const PipelineLauncherPanel = ({ addToast }) => {
                         {loading ? 'Queuing...' : 'Start Pipeline'}
                     </button>
                 </div>
+            </div>
+        </div>
+    );
+};
+
+const AxelLogPanel = () => {
+    const [tab, setTab] = React.useState('trigger');
+    const [triggerLines, setTriggerLines] = React.useState([]);
+    const [activityLines, setActivityLines] = React.useState([]);
+    const [triggerTotal, setTriggerTotal] = React.useState(0);
+    const [activityTotal, setActivityTotal] = React.useState(0);
+    const triggerRef = React.useRef(null);
+    const activityRef = React.useRef(null);
+
+    const fetchLogs = React.useCallback(() => {
+        apiFetch('/logs/axel').then(d => {
+            if (d.lines) { setTriggerLines(d.lines); setTriggerTotal(d.total || 0); }
+        }).catch(() => {});
+        apiFetch('/logs/axel-activity').then(d => {
+            if (d.lines) { setActivityLines(d.lines); setActivityTotal(d.total || 0); }
+        }).catch(() => {});
+    }, []);
+
+    React.useEffect(() => {
+        fetchLogs();
+        const i = setInterval(fetchLogs, 5000);
+        return () => clearInterval(i);
+    }, [fetchLogs]);
+
+    React.useEffect(() => {
+        if (triggerRef.current) triggerRef.current.scrollTop = triggerRef.current.scrollHeight;
+    }, [triggerLines]);
+    React.useEffect(() => {
+        if (activityRef.current) activityRef.current.scrollTop = activityRef.current.scrollHeight;
+    }, [activityLines]);
+
+    const tabBtn = (name, label, count) => (
+        <button onClick={() => setTab(name)} style={{ background: 'none', border: 'none', borderBottom: tab === name ? '2px solid var(--done)' : '2px solid transparent', color: tab === name ? 'var(--done)' : 'var(--muted)', padding: '9px 16px', fontSize: '0.72em', fontWeight: 700, letterSpacing: '0.1em', cursor: 'pointer', textTransform: 'uppercase', fontFamily: 'var(--font-ui)', marginBottom: '-1px', borderRadius: 0, transition: 'color 0.15s, border-color 0.15s' }}>
+            {label} <span style={{ opacity: 0.5, fontWeight: 400 }}>({count})</span>
+        </button>
+    );
+
+    const lines = tab === 'trigger' ? triggerLines : activityLines;
+    const total = tab === 'trigger' ? triggerTotal : activityTotal;
+    const ref   = tab === 'trigger' ? triggerRef   : activityRef;
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--surface)' }}>
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface2)', alignItems: 'center', padding: '0 8px', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex' }}>
+                    {tabBtn('trigger',  'Session Log',  triggerLines.length)}
+                    {tabBtn('activity', 'Activity Log', activityLines.length)}
+                </div>
+                <div style={{ fontSize: '0.68em', color: 'var(--muted)', fontFamily: 'var(--font-ui)', paddingRight: 8 }}>
+                    showing last {lines.length} of {total} lines &nbsp;
+                    <button onClick={fetchLogs} style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--muted)', cursor: 'pointer', padding: '2px 8px', borderRadius: 3, fontSize: '0.9em', fontFamily: 'var(--font-ui)' }}>Refresh</button>
+                </div>
+            </div>
+            <div ref={ref} style={{ flex: 1, overflowY: 'auto', fontFamily: 'var(--font-mono)', fontSize: '0.75em', lineHeight: 1.6, color: 'var(--text)', background: 'var(--surface)', padding: '12px 16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', borderTop: '1px solid var(--border)' }}>
+                {lines.length === 0
+                    ? <span style={{ color: 'var(--muted)' }}>No log entries yet. Trigger an axel task via ntfy to see output here.</span>
+                    : lines.map((l, i) => <div key={i}>{l}</div>)
+                }
             </div>
         </div>
     );

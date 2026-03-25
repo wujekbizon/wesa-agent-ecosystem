@@ -25,6 +25,11 @@ Changes in v0.6:
 Changes in v0.7:
 - Automatic retry with exponential backoff for transient API errors (503, 429, UNAVAILABLE)
 - Retries up to 3 times with delays: 30s -> 60s -> 120s before marking failed
+
+Changes in v0.8:
+- ntfy bidirectional: make_ntfy_handler closure, dispatch_ntfy_command, pause/stop flag checks
+- axel task type: runs axel_trigger.py headlessly for autonomous Axel orchestration
+- execute_git_block: full per-command output in result, proper error detection for all git failures
 """
 
 import os
@@ -232,11 +237,13 @@ def _run_git(args: list, cwd: Path, max_lines: int = 300) -> str:
         return f"(git command failed: {e})"
 
 
+_GIT_ERROR_MARKERS = ("error:", "fatal:", "pathspec did not match", "not a git repo", "not found in PATH")
+
 def execute_git_block(result: str, cwd: Path) -> tuple[bool, str]:
     """
     Parse G1's output for git add/commit lines and execute them.
     Handles both bare lines and lines inside markdown code fences.
-    Returns (success, summary_message).
+    Returns (success, summary_message) where summary includes per-command output.
     """
     # Strip markdown code fences so we can scan inside them too
     clean = re.sub(r'```[^\n]*\n', '', result)
@@ -250,9 +257,8 @@ def execute_git_block(result: str, cwd: Path) -> tuple[bool, str]:
     if not commands:
         return False, "No git commands found in G1 output — nothing executed."
 
-    executed = []
+    log_lines = []
     for cmd in commands:
-        parts = cmd.split(None, 1)  # split on first space only for "git"
         args = cmd[len("git "):].strip()  # everything after "git "
         # Build proper args list
         if args.startswith("add "):
@@ -265,14 +271,27 @@ def execute_git_block(result: str, cwd: Path) -> tuple[bool, str]:
             continue
 
         out = _run_git(git_args, cwd)
-        log(f"[G1 exec] git {' '.join(git_args[:2])} → {out[:80]}")
-        executed.append(f"git {' '.join(git_args)}")
+        cmd_label = f"git {' '.join(git_args[:2])}"
+        log(f"[G1 exec] {cmd_label} → {out[:120]}")
+        log_lines.append(f"{cmd_label}:\n  {out[:300]}")
 
-        # If commit failed, stop
-        if git_args[0] == "commit" and "nothing to commit" in out.lower():
-            return False, f"Commit skipped — nothing staged. Commands run: {len(executed)}"
+        # Check for errors on any command
+        out_lower = out.lower()
+        if any(marker in out_lower for marker in _GIT_ERROR_MARKERS):
+            summary = f"FAILED at '{cmd_label}':\n  {out}\n\nPrevious commands:\n" + "\n".join(log_lines[:-1]) if len(log_lines) > 1 else f"FAILED: {out}"
+            return False, summary
 
-    return True, f"Executed {len(executed)} git commands:\n" + "\n".join(f"  {c}" for c in executed)
+        # Commit-specific checks
+        if git_args[0] == "commit":
+            if "nothing to commit" in out_lower:
+                return False, f"Commit skipped — nothing staged.\n\n" + "\n".join(log_lines)
+            if "author identity unknown" in out_lower or "please tell me who you are" in out_lower:
+                return False, f"Commit failed — git user.name/user.email not configured.\nRun: git config --global user.email / user.name\n\n{out}"
+
+    if not log_lines:
+        return False, "No valid git commands parsed."
+
+    return True, "Git commands executed:\n\n" + "\n\n".join(log_lines)
 
 
 def enrich_git_prompt(task: Task) -> None:
@@ -596,9 +615,13 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
 def make_ntfy_handler(queue: TaskQueue, logs_dir: Path):
     """Return a closure that handles inbound ntfy messages with access to queue and logs_dir."""
     def handle_ntfy_message(msg: dict) -> None:
-        raw = (msg.get("message") or "").strip()
-        # Ignore outbound daemon notifications echoed back by ntfy
-        if "Model:" in raw or "Task Done:" in raw or "Task Failed:" in raw:
+        raw   = (msg.get("message") or "").strip()
+        title = (msg.get("title")   or "").strip()
+        # Ignore outbound daemon/axel-trigger notifications echoed back by ntfy
+        # Check both body and title — notify_failed/done put context in title, not body
+        if "[axel-trigger]" in raw or "Model:" in raw:
+            return
+        if any(t in title for t in ("Task Done:", "Task Failed:", "WESA Daemon", "Axel Session", "Pipeline:")):
             return
         # Try command dispatch first (status, pause, stop, help, approve, retry)
         if dispatch_ntfy_command(raw, queue, logs_dir, notify):

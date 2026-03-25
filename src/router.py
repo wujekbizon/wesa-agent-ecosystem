@@ -41,6 +41,8 @@ class Router:
     def _get_agent(self, skill: AgentSkill) -> GeminiAgent | OllamaAgent:
         use_web_search = getattr(skill, 'use_web_search', False)
         model_override = getattr(skill, 'gemini_model', '') or ''
+        _t = getattr(skill, 'gemini_timeout', 0)
+        timeout_override = int(_t) if _t else None
 
         if skill.model == 'ollama':
             self._agents[skill.name] = OllamaAgent(
@@ -55,12 +57,14 @@ class Router:
                     system_prompt=skill.system_prompt,
                     agent_name=skill.name,
                     model_override=model_override or None,
+                    timeout_override=timeout_override,
                 )
             else:
                 self._agents[skill.name] = GeminiAgent(
                     system_prompt=skill.system_prompt,
                     agent_name=skill.name,
                     model_override=model_override or None,
+                    timeout_override=timeout_override,
                 )
         return self._agents[skill.name]
 

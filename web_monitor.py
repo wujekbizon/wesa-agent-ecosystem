@@ -470,6 +470,7 @@ async def scheduler_disable():
 
 PIPELINES_RUNNING_DIR = BASE_DIR / "agents" / "pipelines" / "running"
 
+@app.get("/api/pipelines")
 @app.get("/api/pipelines/running")
 async def get_running_pipelines():
     runs = []
@@ -513,6 +514,35 @@ async def daemon_restart():
         pass
     return {"ok": True, "pid": proc.pid}
 
+# --- Axel Log ---
+
+AXEL_TRIGGER_LOG = LOGS_DIR / "axel_trigger.log"
+AXEL_LOG_FILE    = LOGS_DIR / "AXEL_LOG.md"
+
+@app.get("/api/logs/axel")
+async def get_axel_log(lines: int = 120):
+    """Return the last N lines of axel_trigger.log (headless session output)."""
+    if not AXEL_TRIGGER_LOG.exists():
+        return {"lines": [], "exists": False}
+    try:
+        content = AXEL_TRIGGER_LOG.read_text(encoding="utf-8", errors="replace")
+        all_lines = content.splitlines()
+        return {"lines": all_lines[-lines:], "exists": True, "total": len(all_lines)}
+    except Exception as e:
+        return {"lines": [f"Error reading log: {e}"], "exists": True, "total": 0}
+
+@app.get("/api/logs/axel-activity")
+async def get_axel_activity_log(lines: int = 80):
+    """Return the last N lines of AXEL_LOG.md (append-only activity log)."""
+    if not AXEL_LOG_FILE.exists():
+        return {"lines": [], "exists": False}
+    try:
+        content = AXEL_LOG_FILE.read_text(encoding="utf-8", errors="replace")
+        all_lines = content.splitlines()
+        return {"lines": all_lines[-lines:], "exists": True, "total": len(all_lines)}
+    except Exception as e:
+        return {"lines": [f"Error reading log: {e}"], "exists": True, "total": 0}
+
 # --- WebSocket ---
 
 @app.websocket("/ws")
@@ -523,7 +553,7 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             await websocket.send_json(queue.get_all())
             await asyncio.sleep(2)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, asyncio.CancelledError):
         pass
 
 # --- Entry Point ---

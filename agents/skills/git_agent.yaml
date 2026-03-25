@@ -1,6 +1,7 @@
 name: G1
 role: Git Agent
-model: ollama
+model: gemini
+gemini_model: gemini-2.5-flash
 task_types:
   - git
 

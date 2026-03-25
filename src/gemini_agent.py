@@ -26,8 +26,9 @@ class GeminiAgent:
         agent_name: str = "GeminiAgent",
         use_web_search: bool = False,
         model_override: str | None = None,
+        timeout_override: int | None = None,
     ):
-        self._timeout = int(os.getenv("GEMINI_TIMEOUT", "120"))
+        self._timeout = timeout_override if timeout_override else int(os.getenv("GEMINI_TIMEOUT", "120"))
         self.client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
         
         # If model_override is provided and non-empty, use it.
@@ -72,12 +73,14 @@ class GeminiAgent:
         system_prompt: str,
         agent_name: str,
         model_override: str | None = None,
+        timeout_override: int | None = None,
     ) -> "GeminiAgent":
         return cls(
             system_prompt=system_prompt,
             agent_name=agent_name,
             use_web_search=True,
             model_override=model_override,
+            timeout_override=timeout_override,
         )
 
     @property
