@@ -1,0 +1,26 @@
+services:
+  file_server:
+    build: ./file_server
+    ports:
+      - "8001:8001"
+    volumes:
+      - ${WESA_PROJECT_ROOT}:/workspace
+    environment:
+      - FILE_SERVER_ROOT=/workspace
+    restart: unless-stopped
+
+  shell_server:
+    build: ./shell_server
+    ports:
+      - "8002:8002"
+    volumes:
+      - ${WESA_PROJECT_ROOT}:/workspace
+      - ./shell_server/shell_config.json:/app/config.json
+    restart: unless-stopped
+
+  browser_server:
+    build: ./browser_server
+    ports:
+      - "8003:8003"
+    shm_size: "2gb"
+    restart: unless-stopped

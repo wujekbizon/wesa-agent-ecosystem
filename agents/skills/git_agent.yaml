@@ -65,3 +65,4 @@ system_prompt: |
   5. Skip: __pycache__/, *.pyc, .env, *.db, logs/, tasks/ (runtime artifacts)
   6. Skip: agents/skills/overlays/ — these are per-run design loop artifacts, never commit them
   7. If a file appears modified in the diff with real code changes, stage it
+  8. Also stage untracked files/directories (marked `??` in git status) if they fall under the safe paths in Rule 4 — untracked files never appear in git diff HEAD, so git status is the only signal for them. Use `git add <path>` for the whole directory.

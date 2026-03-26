@@ -70,7 +70,6 @@ class OllamaAgent:
                 mcp.close()
                 return _call_no_tools()
 
-            # Build Ollama tool declarations (OpenAI format)
             tools = [
                 {
                     "type": "function",
@@ -83,7 +82,6 @@ class OllamaAgent:
                 for t in mcp_tools
             ]
 
-            # Conversation history for /api/chat
             messages = [
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": prompt},
@@ -118,16 +116,17 @@ class OllamaAgent:
                 tool_calls = message.get("tool_calls", [])
 
                 if not tool_calls:
-                    # No tool calls — final response
                     result_text = message.get("content", "").strip()
                     if turn == MAX_TURNS - 1 and not result_text:
                         result_text = "[WARN: MAX_TURNS reached]"
                     break
 
-                # Add assistant message to history
-                messages.append({"role": "assistant", "content": message.get("content", ""), "tool_calls": tool_calls})
+                messages.append({
+                    "role": "assistant",
+                    "content": message.get("content", ""),
+                    "tool_calls": tool_calls,
+                })
 
-                # Execute each tool call
                 for tc in tool_calls:
                     fn = tc.get("function", {})
                     tool_name = fn.get("name", "")
@@ -139,10 +138,7 @@ class OllamaAgent:
                         except Exception:
                             arguments = {}
                     tool_result = mcp.call_tool(tool_name, arguments)
-                    messages.append({
-                        "role": "tool",
-                        "content": tool_result,
-                    })
+                    messages.append({"role": "tool", "content": tool_result})
 
                 if turn == MAX_TURNS - 1:
                     result_text = "[WARN: MAX_TURNS reached]"
@@ -157,3 +153,4 @@ class OllamaAgent:
     @property
     def model_name(self) -> str:
         return f"{self._model} ({self.agent_name})"
+      
