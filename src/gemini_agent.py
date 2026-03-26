@@ -12,6 +12,7 @@ import concurrent.futures
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
+from src.mcp_client import MCPClient, MCPTool
 
 load_dotenv()
 
@@ -31,8 +32,6 @@ class GeminiAgent:
         self._timeout = timeout_override if timeout_override else int(os.getenv("GEMINI_TIMEOUT", "120"))
         self.client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
         
-        # If model_override is provided and non-empty, use it.
-        # Otherwise, fall back to environment variable or default.
         if model_override:
             self._model_name = model_override
         else:
@@ -42,11 +41,11 @@ class GeminiAgent:
         self.agent_name = agent_name
         self.use_web_search = use_web_search
 
-    def run(self, prompt: str) -> str:
-        def _call():
-            config_args = {
-                "system_instruction": self.system_prompt,
-            }
+    def run(self, prompt: str, server_configs: list[dict] | None = None) -> str:
+        MAX_TURNS = 10
+
+        def _call_no_tools() -> str:
+            config_args = {"system_instruction": self.system_prompt}
             if self.use_web_search:
                 config_args["tools"] = [types.Tool(google_search=types.GoogleSearch())]
             response = self.client.models.generate_content(
@@ -58,9 +57,77 @@ class GeminiAgent:
                 raise RuntimeError("Gemini returned no text content (possible safety block or invalid model name)")
             return response.text.strip()
 
+        def _call_with_tools() -> str:
+            mcp = MCPClient()
+            mcp.connect(server_configs)
+            mcp_tools = mcp.discover_tools()
+
+            if not mcp_tools:
+                mcp.close()
+                return _call_no_tools()
+
+            func_decls = [
+                types.FunctionDeclaration(
+                    name=t.name,
+                    description=t.description,
+                    parameters=t.input_schema if t.input_schema else {},
+                )
+                for t in mcp_tools
+            ]
+            config = types.GenerateContentConfig(
+                system_instruction=self.system_prompt,
+                tools=[types.Tool(function_declarations=func_decls)],
+            )
+            contents = [types.Content(role="user", parts=[types.Part(text=prompt)])]
+            result_text = ""
+
+            for turn in range(MAX_TURNS):
+                response = self.client.models.generate_content(
+                    model=self._model_name,
+                    contents=contents,
+                    config=config,
+                )
+                candidate = response.candidates[0] if response.candidates else None
+                if candidate is None:
+                    break
+
+                function_calls = [
+                    p.function_call
+                    for p in candidate.content.parts
+                    if p.function_call is not None
+                ]
+
+                if not function_calls:
+                    result_text = response.text.strip() if response.text else ""
+                    break
+
+                contents.append(candidate.content)
+
+                tool_response_parts = []
+                for fc in function_calls:
+                    tool_result = mcp.call_tool(fc.name, dict(fc.args) if fc.args else {})
+                    tool_response_parts.append(
+                        types.Part(
+                            function_response=types.FunctionResponse(
+                                name=fc.name,
+                                response={"result": tool_result},
+                            )
+                        )
+                    )
+                contents.append(types.Content(role="tool", parts=tool_response_parts))
+
+                if turn == MAX_TURNS - 1:
+                    result_text = f"{response.text or ''} [WARN: MAX_TURNS reached]".strip()
+
+            mcp.close()
+            return result_text
+
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_call)
+                if server_configs:
+                    future = executor.submit(_call_with_tools)
+                else:
+                    future = executor.submit(_call_no_tools)
                 return future.result(timeout=self._timeout)
         except concurrent.futures.TimeoutError:
             raise RuntimeError(f"{self.agent_name} error: timed out after {self._timeout}s")

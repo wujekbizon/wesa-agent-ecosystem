@@ -1,5 +1,5 @@
 """
-WESA Agent Ecosystem - Agent Daemon v0.5
+WESA Agent Ecosystem - Agent Daemon v0.8
 Run this once and leave it running. It watches the tasks/ folder
 and processes any new task files automatically.
 
