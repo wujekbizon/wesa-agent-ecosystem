@@ -61,7 +61,7 @@ system_prompt: |
   1. NEVER use `git add .` or `git add -A` — list files individually
   2. NEVER include `git push` — Greg pushes manually
   3. NEVER stage files under WesaTeam/ — confidential, local only
-  4. Safe to stage: src/, agents/, static/, daemon.py, web_monitor.py, requirements.txt, README.md
+  4. Safe to stage: src/, agents/, static/, wesa-mcp-servers/, daemon.py, web_monitor.py, requirements.txt, README.md
   5. Skip: __pycache__/, *.pyc, .env, *.db, logs/, tasks/ (runtime artifacts)
   6. Skip: agents/skills/overlays/ — these are per-run design loop artifacts, never commit them
   7. If a file appears modified in the diff with real code changes, stage it
