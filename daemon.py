@@ -35,6 +35,7 @@ Changes in v0.8:
 import os
 import signal
 import threading
+import concurrent.futures
 import time
 import sys
 import json
@@ -63,6 +64,7 @@ LOGS_RESEARCH_DIR = LOGS_DIR / "research"
 LOGS_DEV_DIR = LOGS_DIR / "dev"
 BRIEFING_FILE = LOGS_DIR / "AXEL_BRIEFING.md"
 POLL_INTERVAL = 3
+MAX_WORKERS = int(os.environ.get("DAEMON_MAX_WORKERS", "4"))
 RC_INTERVAL_HOURS = int(os.environ.get("RC_INTERVAL_HOURS", "4"))
 RC_SCHEDULE_FILE = LOGS_DIR / "rc_schedule.json"
 RC_PIPELINE_NAME = "research-center"
@@ -92,6 +94,10 @@ REPO_DIR = Path(__file__).parent
 
 # Workspace root: three levels up from daemon.py = Coworker/
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Shared lock for all state writes (SQLite, pipeline_ctrl, briefing file).
+# Held only during short DB/file update windows — never during agent.run().
+_state_lock = threading.Lock()
 
 
 def setup_dirs():
@@ -321,15 +327,24 @@ def enrich_git_prompt(task: Task) -> None:
 
 # --- Retry logic (v0.7) ---
 
-RETRY_DELAYS = [30, 60, 120]  # seconds between retry attempts
+RETRY_DELAYS = [30, 60, 120]          # seconds between retries for API errors (429, 503, etc.)
+TIMEOUT_RETRY_DELAYS = [120, 300, 600]  # longer waits for timeouts — retrying after 30s is pointless
+RETRYABLE_TASK_TYPES = {"research", "analyze", "design"}  # task types eligible for auto-requeue on failure
+MAX_AUTO_RETRIES = 2          # max auto-requeues per original task
+RETRY_AFTER_MINUTES = 5       # minutes to wait before auto-retry fires
+
+
+def is_timeout_error(e: Exception) -> bool:
+    """Return True if the error is an agent-level timeout (timed out after Ns)."""
+    return 'timed out after' in str(e).lower()
 
 
 def is_transient_error(e: Exception) -> bool:
-    """Return True if the error is a transient API error worth retrying."""
+    """Return True if the error is transient and worth retrying (API errors + timeouts)."""
     msg = str(e).lower()
     return any(marker in msg for marker in [
         '503', '429', 'unavailable', 'deadline expired', 'high demand',
-        'resource exhausted', 'service unavailable'
+        'resource exhausted', 'service unavailable', 'timed out after'
     ])
 
 
@@ -481,20 +496,68 @@ def append_pipeline_notification(completion: dict):
         f.write(notice)
 
 
-def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctrl: PipelineController):
+def _claim_task(task_path: Path, queue: TaskQueue) -> "Task | None":
+    """
+    Atomically claim a pending task. Returns Task if claimed, None if already taken.
+    Respects retry_after field — skips tasks that are not yet due.
+    Must be called under _state_lock.
+    """
+    try:
+        raw = json.loads(task_path.read_text(encoding="utf-8"))
+        retry_after = raw.get("retry_after")
+        if retry_after and datetime.now() < datetime.fromisoformat(retry_after):
+            return None  # not yet time to retry
+    except Exception:
+        pass
     task = Task.from_file(task_path)
-
     if task.status != TaskStatus.PENDING:
-        return
+        return None
+    task.status = TaskStatus.IN_PROGRESS
+    task.save(task_path)
+    queue.update_status(task.id, "in_progress")
+    return task
+
+
+def _schedule_retry(task: Task, task_path: Path) -> bool:
+    """
+    Auto-requeue a failed task if eligible.
+    Only fires for transient failures (timeouts, API errors) on retryable task types.
+    Returns True if a retry was scheduled.
+    """
+    task_type_str = str(task.type).replace("TaskType.", "")
+    if task_type_str not in RETRYABLE_TASK_TYPES:
+        return False
+    retry_count = task.id.count("_retry")
+    if retry_count >= MAX_AUTO_RETRIES:
+        log(f"[retry] {task.id} hit MAX_AUTO_RETRIES ({MAX_AUTO_RETRIES}) — no further auto-retry")
+        return False
+    retry_id = f"{task.id}_retry{retry_count + 1}"
+    retry_after = (datetime.now() + timedelta(minutes=RETRY_AFTER_MINUTES)).isoformat()
+    retry_task: dict = {
+        "id": retry_id,
+        "type": task_type_str,
+        "prompt": task.prompt,
+        "status": "pending",
+        "created_at": datetime.now().isoformat(),
+        "retry_after": retry_after,
+        "retry_of": task.id,
+    }
+    if task.output_file:
+        retry_task["output_file"] = task.output_file
+    retry_path = task_path.parent / f"{retry_id}.json"
+    retry_path.write_text(json.dumps(retry_task, indent=2), encoding="utf-8")
+    log(f"[retry] Scheduled {retry_id} in {RETRY_AFTER_MINUTES}min (attempt {retry_count + 1}/{MAX_AUTO_RETRIES})")
+    return True
+
+
+def process_task(task: Task, task_path: Path, router: Router, queue: TaskQueue, pipeline_ctrl: PipelineController):
+    """Execute a pre-claimed task. Task is already IN_PROGRESS when this is called."""
+    task_type_str = str(task.type).replace("TaskType.", "")
 
     # axel tasks: run axel_trigger.py headlessly — consumed here, not sent to a worker
-    task_type_str = str(task.type).replace("TaskType.", "")
     if task_type_str == "axel":
         message = task.prompt.strip() or "Axel, check inbox and proceed autonomously"
         log(f"[axel] Launching headless Axel session: {message[:80]}")
-        task.status = TaskStatus.IN_PROGRESS
-        task.save(task_path)
-        queue.update_status(task.id, "in_progress")
         try:
             trigger_script = Path(__file__).parent / "axel_trigger.py"
             result = subprocess.run(
@@ -514,11 +577,12 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
             summary = f"axel_trigger error: {e}"
         task.completed_at = datetime.now().isoformat()
         task.save(task_path)
-        if task.status == TaskStatus.DONE:
-            queue.update_status(task.id, "done", result=task.result)
-        else:
-            queue.update_status(task.id, "failed", error=task.error)
-        update_briefing(queue)
+        with _state_lock:
+            if task.status == TaskStatus.DONE:
+                queue.update_status(task.id, "done", result=task.result)
+            else:
+                queue.update_status(task.id, "failed", error=task.error)
+            update_briefing(queue)
         log(f"[axel] Session complete: {summary[:120]}")
         return
 
@@ -528,7 +592,8 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
         if pipeline_name:
             log(f"Pipeline trigger: {pipeline_name} | topic: {topic}")
             try:
-                run_id = pipeline_ctrl.start_pipeline(pipeline_name, queue, topic)
+                with _state_lock:
+                    run_id = pipeline_ctrl.start_pipeline(pipeline_name, queue, topic)
                 log(f"Pipeline '{pipeline_name}' started — run_id: {run_id}")
             except Exception as e:
                 log(f"Pipeline start failed: {e}")
@@ -536,23 +601,22 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
         task.completed_at = datetime.now().isoformat()
         task.result = f"Pipeline trigger consumed: {task.prompt}"
         task.save(task_path)
-        queue.update_status(task.id, "done", result=task.result)
-        update_briefing(queue)
+        with _state_lock:
+            queue.update_status(task.id, "done", result=task.result)
+            update_briefing(queue)
         return
 
     log(f"Processing task {task.id} [{task.type}] ...")
-    task.status = TaskStatus.IN_PROGRESS
 
     # Auto-enrich git tasks: inject live git status + diff before routing to G1
     if task_type_str == "git":
         log(f"Task {task.id} [git] — injecting live git context from {REPO_DIR.name}")
         enrich_git_prompt(task)
-
-    task.save(task_path)
-    queue.update_status(task.id, "in_progress")
+        task.save(task_path)  # persist enriched prompt to disk
 
     try:
         # Retry loop: up to 3 retries for transient errors (503, 429, UNAVAILABLE)
+        # router.run() is intentionally outside _state_lock — it is the long part.
         result, model_used = None, None
         for attempt in range(len(RETRY_DELAYS) + 1):  # attempts: 0, 1, 2, 3
             try:
@@ -560,7 +624,7 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
                 break  # success — exit retry loop
             except Exception as e:
                 if is_transient_error(e) and attempt < len(RETRY_DELAYS):
-                    wait = RETRY_DELAYS[attempt]
+                    wait = TIMEOUT_RETRY_DELAYS[attempt] if is_timeout_error(e) else RETRY_DELAYS[attempt]
                     log(f"Task {task.id} transient error (attempt {attempt + 1}/3): {e}. Retrying in {wait}s...")
                     time.sleep(wait)
                 else:
@@ -571,7 +635,6 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
         task.status = TaskStatus.DONE
         task.completed_at = datetime.now().isoformat()
         task.save(task_path)
-        queue.update_status(task.id, "done", result=result, model_used=model_used)
 
         write_report(task)
 
@@ -588,10 +651,11 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
             auto_path.write_text(strip_code_fences(result), encoding="utf-8")
             task.output_file = f"WesaTeam/agent-ecosystem/static/designs/{task.id}_prototype.html"
             task.save(task_path)
-            queue.update_status(task.id, "done", result=result, model_used=model_used)
-            log(f"[Design] Auto-saved to {auto_path}")
 
-        update_briefing(queue)
+        with _state_lock:
+            queue.update_status(task.id, "done", result=result, model_used=model_used)
+            update_briefing(queue)
+
         log(f"Task {task.id} DONE via {model_used}")
 
         # Auto-execute git commands from G1 output
@@ -600,25 +664,29 @@ def process_task(task_path: Path, router: Router, queue: TaskQueue, pipeline_ctr
             log(f"[G1 exec] {'OK' if success else 'SKIPPED'}: {summary.splitlines()[0]}")
             task.result = result + f"\n\n---\n**Auto-executed**: {summary}"
             task.save(task_path)
-            queue.update_status(task.id, "done", result=task.result, model_used=model_used)
+            with _state_lock:
+                queue.update_status(task.id, "done", result=task.result, model_used=model_used)
 
         notify_done(task.id, task.type, model_used)
 
         # Advance pipeline if this task belongs to one
-        completion = pipeline_ctrl.on_task_complete(task.id, result, queue)
-
-        # If a pipeline just finished and requested notification, append to AXEL_BRIEFING
-        if completion:
-            append_pipeline_notification(completion)
+        with _state_lock:
+            completion = pipeline_ctrl.on_task_complete(task.id, result, queue)
+            if completion:
+                append_pipeline_notification(completion)
 
     except Exception as e:
         task.error = str(e)
         task.status = TaskStatus.FAILED
         task.completed_at = datetime.now().isoformat()
         task.save(task_path)
-        queue.update_status(task.id, "failed", error=str(e))
-        write_report(task)
-        update_briefing(queue)
+        # Auto-requeue for transient failures (timeouts, API errors) on eligible task types
+        if is_transient_error(e):
+            _schedule_retry(task, task_path)
+        with _state_lock:
+            queue.update_status(task.id, "failed", error=str(e))
+            write_report(task)
+            update_briefing(queue)
         log(f"Task {task.id} FAILED: {e}")
         notify_failed(task.id, str(e))
         
@@ -666,7 +734,7 @@ def run():
         staging_queue=staging,
     )
 
-    log("=== WESA Agent Daemon v0.7 STARTED ===")
+    log(f"=== WESA Agent Daemon v0.9 STARTED (max_workers={MAX_WORKERS}) ===")
     log(f"Watching:       {TASKS_DIR.resolve()}")
     log(f"Reports:        {LOGS_DIR.resolve()}")
     log(f"SQLite DB:      {(LOGS_DIR / 'tasks.db').resolve()}")
@@ -685,41 +753,57 @@ def run():
     ntfy_handler = make_ntfy_handler(queue, LOGS_DIR)
     start_ntfy_listener(ntfy_handler, ntfy_stop)
 
-    while True:
-        try:
-            # Check stop flag (ntfy 'stop' command)
-            stop_flag = LOGS_DIR / "daemon_stop.flag"
-            if stop_flag.exists():
-                stop_flag.unlink()
-                log("[ntfy-cmd] Stop flag detected. Daemon stopping cleanly.")
-                break
+    futures: dict = {}  # Future -> task_id
 
-            # Check pause flag (ntfy 'pause' command) — spin until flag removed
-            pause_flag = LOGS_DIR / "daemon_pause.flag"
-            if pause_flag.exists():
-                log("[ntfy-cmd] Pause flag detected. Sleeping...")
-                while pause_flag.exists():
-                    time.sleep(POLL_INTERVAL)
-                log("[ntfy-cmd] Pause flag removed. Resuming.")
-
-            sync_json_to_db(queue)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        while True:
             try:
-                auto_run_research_center(pipeline_ctrl, queue)
-            except Exception as e:
-                log(f"[RC Auto] Scheduler error: {e}")
-            # Re-sync: pipeline/RC may have dropped new JSON files after the first sync
-            sync_json_to_db(queue)
-            for task_file in sorted(TASKS_DIR.glob("*.json")):
+                # Check stop flag (ntfy 'stop' command)
+                stop_flag = LOGS_DIR / "daemon_stop.flag"
+                if stop_flag.exists():
+                    stop_flag.unlink()
+                    log("[ntfy-cmd] Stop flag detected. Daemon stopping — waiting for running tasks...")
+                    break
+
+                # Check pause flag (ntfy 'pause' command) — spin until flag removed
+                pause_flag = LOGS_DIR / "daemon_pause.flag"
+                if pause_flag.exists():
+                    log("[ntfy-cmd] Pause flag detected. Sleeping...")
+                    while pause_flag.exists():
+                        time.sleep(POLL_INTERVAL)
+                    log("[ntfy-cmd] Pause flag removed. Resuming.")
+
+                sync_json_to_db(queue)
                 try:
-                    process_task(task_file, router, queue, pipeline_ctrl)
+                    auto_run_research_center(pipeline_ctrl, queue)
                 except Exception as e:
-                    log(f"Unhandled error on {task_file.name}: {e}")
-            time.sleep(POLL_INTERVAL)
-        except KeyboardInterrupt:
-            log("Daemon stopped.")
-            break
+                    log(f"[RC Auto] Scheduler error: {e}")
+                # Re-sync: pipeline/RC may have dropped new JSON files after the first sync
+                sync_json_to_db(queue)
+
+                for task_file in sorted(TASKS_DIR.glob("*.json")):
+                    with _state_lock:
+                        task = _claim_task(task_file, queue)
+                    if task is None:
+                        continue
+                    future = executor.submit(process_task, task, task_file, router, queue, pipeline_ctrl)
+                    futures[future] = task.id
+                    log(f"[thread] Submitted {task.id} [{task.type}] (active: {len(futures)})")
+
+                # Reap completed futures and surface any uncaught errors
+                done_futures = [f for f in list(futures.keys()) if f.done()]
+                for f in done_futures:
+                    try:
+                        f.result()
+                    except Exception as e:
+                        log(f"[thread] Uncaught error in task {futures[f]}: {e}")
+                    del futures[f]
+
+                time.sleep(POLL_INTERVAL)
+            except KeyboardInterrupt:
+                log("Daemon stopping — waiting for running tasks to finish...")
+                break
 
 
 if __name__ == "__main__":
     run()
-

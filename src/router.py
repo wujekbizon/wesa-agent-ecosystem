@@ -9,11 +9,13 @@ Routing:
 """
 
 import logging
+import dataclasses
 
 from src.task import Task
 from src.gemini_agent import GeminiAgent
 from src.ollama_agent import OllamaAgent
 from src.agent_loader import load_skills, AgentSkill
+from src import tool_layer
 
 logger = logging.getLogger(__name__)
 
@@ -89,5 +91,6 @@ class Router:
                 )
 
         agent = self._get_agent(skill)
-        result = agent.run(task.prompt)
+        server_configs = tool_layer.resolve(dataclasses.asdict(skill))
+        result = agent.run(task.prompt, server_configs=server_configs)
         return result, agent.model_name

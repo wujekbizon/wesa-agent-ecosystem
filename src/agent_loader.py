@@ -30,6 +30,8 @@ class AgentSkill:
     gemini_timeout: int = 0     # Per-agent timeout in seconds. 0 = use GEMINI_TIMEOUT env var (default 120)
     ollama_model: str = ""      # Optional per-agent Ollama model override
     ollama_options: dict = field(default_factory=dict)  # Optional Ollama params (num_ctx, temperature, top_p)
+    mcp_servers: list[str] = field(default_factory=list)  # MCP server names this agent can use (e.g. ["file_server", "shell_server"])
+    file_root: str | None = None                          # Host path scoping file_server + shell_server. None = not applicable
 
 
 def validate_skill(data: dict[str, Any], filepath: str) -> tuple[bool, str]:
@@ -117,6 +119,8 @@ def load_skills(skills_dir: Path = SKILLS_DIR) -> dict[str, AgentSkill]:
             gemini_timeout=int(data.get("gemini_timeout", 0)),
             ollama_model=str(data.get("ollama_model", "")),
             ollama_options=dict(data.get("ollama_options") or {}),
+            mcp_servers=list(data.get("mcp_servers") or []),
+            file_root=data.get("file_root", None),
         )
         for task_type in skill.task_types:
             skills[task_type] = skill

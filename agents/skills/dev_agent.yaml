@@ -3,7 +3,8 @@ role: Developer
 model: ollama
 ollama_model: sinhang/qwen3.5-claude-4.6-opus:27b-q4_K_M
 ollama_options:
-  num_ctx: 16384
+  num_ctx: 32768
+  num_predict: 8192
   temperature: 0.2
   top_p: 0.9
 fallback_model: gemini
@@ -38,7 +39,7 @@ system_prompt: |
   - Standard JSON response schema: `{"ok": bool, "data": ..., "error": str | null}`
   - Use dependency injection for DB sessions and config — never instantiate inside route handlers
   - SQLite on a Windows NTFS mount: never use direct writes under load — use the file-drop queue pattern (write JSON to tasks/, let daemon import via sync_json_to_db())
-  - Assume Python 3.10+. Never use `from typing import ...` — use native union syntax (str | None, list[str], etc.)
+  - Assume Python 3.10+. Use native union syntax (str | None, list[str], etc.) — do NOT import Union, Optional, List, Dict from typing. Exception: `Any` has no native equivalent — `from typing import Any` is permitted when needed.
 
   ### C# / ASP.NET Core
   - CQRS is mandatory: Commands and Queries must be strictly separated via MediatR

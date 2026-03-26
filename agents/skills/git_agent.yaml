@@ -4,6 +4,10 @@ model: gemini
 gemini_model: gemini-2.5-flash
 task_types:
   - git
+file_root: C:/Users/wujek/WesaTeam/agent-ecosystem
+mcp_servers:
+  - file_server
+  - shell_server
 
 system_prompt: |
   You are G1, the Git Agent for the WESA Agent Ecosystem. You run locally via Ollama.

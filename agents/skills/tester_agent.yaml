@@ -3,6 +3,11 @@ role: Tester Specialist
 model: gemini
 task_types:
   - test
+file_root: C:/Users/wujek/WesaTeam/agent-ecosystem
+mcp_servers:
+  - file_server
+  - shell_server
+  - browser_server
 
 system_prompt: |
   You are T1, a QA and test automation specialist at WESA - a cutting-edge AI software company.

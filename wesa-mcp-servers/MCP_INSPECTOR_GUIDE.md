@@ -40,17 +40,27 @@ The Inspector opens automatically in your browser at `http://localhost:6274`.
 
 ## Using the Inspector
 
-### 1. Connect
-When the Inspector opens, it shows a connection panel. The server URL is pre-filled from the command. Click **Connect**.
+### 1. Set transport type — CRITICAL
 
+**Inspector v0.21+ defaults to STDIO transport.** WESA servers use Streamable HTTP. If you see a "Command" field or get an `ENOENT` error, the wrong transport is selected.
+
+To fix:
+1. Find the **Transport Type** dropdown (top of the connection panel)
+2. Change it from `STDIO` → **`Streamable HTTP`**
+3. A **URL** field will appear — enter the server URL (e.g. `http://localhost:8001/mcp`)
+4. Click **Connect**
+
+The URL passed on the command line may not override this — always verify the dropdown is set to `Streamable HTTP` before connecting.
+
+### 2. Connect
 On success you'll see: `Connected` and the server name (e.g. `FileServer`, `shell-server`, `wesa-browser-server`).
 
-### 2. Browse tools
+### 3. Browse tools
 Click the **Tools** tab. You'll see all tools the server exposes with their names and descriptions.
 
 Click any tool to expand it and see its input schema.
 
-### 3. Call a tool
+### 4. Call a tool
 Select a tool, fill in the arguments in the form fields, and click **Run Tool**.
 
 The response appears in the right panel — either the return value or an error message.
