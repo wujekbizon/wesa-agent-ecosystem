@@ -503,10 +503,10 @@ def auto_run_scouts(pipeline_ctrl: PipelineController, queue: TaskQueue):
     if SC1_PIPELINE_NAME in pipeline_ctrl._pipelines and _should_run(SC1_SCHEDULE_FILE, SC1_INTERVAL_HOURS):
         # Check no SC1 run is already in flight
         sc1_running = any(
-            json.loads(f.read_text()).get("pipeline") == SC1_PIPELINE_NAME and
-            json.loads(f.read_text()).get("status") == "running"
+            json.loads(f.read_text(encoding="utf-8")).get("pipeline") == SC1_PIPELINE_NAME and
+            json.loads(f.read_text(encoding="utf-8")).get("status") == "running"
             for f in pipeline_ctrl.running_dir.glob("*.json")
-            if f.read_text()
+            if f.read_text(encoding="utf-8")
         )
         if not sc1_running:
             try:
@@ -519,10 +519,10 @@ def auto_run_scouts(pipeline_ctrl: PipelineController, queue: TaskQueue):
     # SY1 synthesis
     if SY1_PIPELINE_NAME in pipeline_ctrl._pipelines and _should_run(SY1_SCHEDULE_FILE, SY1_INTERVAL_HOURS):
         sy1_running = any(
-            json.loads(f.read_text()).get("pipeline") == SY1_PIPELINE_NAME and
-            json.loads(f.read_text()).get("status") == "running"
+            json.loads(f.read_text(encoding="utf-8")).get("pipeline") == SY1_PIPELINE_NAME and
+            json.loads(f.read_text(encoding="utf-8")).get("status") == "running"
             for f in pipeline_ctrl.running_dir.glob("*.json")
-            if f.read_text()
+            if f.read_text(encoding="utf-8")
         )
         if not sy1_running:
             try:

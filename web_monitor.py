@@ -363,7 +363,197 @@ async def discard_brief(brief_id: str):
     staging.update_status(brief_id, "discarded")
     return {"ok": True}
 
-# --- Task Submission ---
+# --- Research Center ---
+
+RC_BRIEFS_FILE    = LOGS_RESEARCH_DIR / "briefs.json"
+RC_SCHEDULE_FILE2 = LOGS_DIR / "rc_schedule.json"   # same as RC_SCHEDULE_FILE above — alias for clarity
+RC_TOPICS_FILE    = BASE_DIR / "agents" / "pipelines" / "rc_topics.json"
+
+
+def _load_briefs() -> List[Dict[str, Any]]:
+    """Load the briefs store from disk. Returns [] if missing/corrupt."""
+    if not RC_BRIEFS_FILE.exists():
+        return []
+    try:
+        return json.loads(RC_BRIEFS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _save_briefs(briefs: List[Dict[str, Any]]) -> None:
+    RC_BRIEFS_FILE.write_text(json.dumps(briefs, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+@app.get("/api/research/briefs")
+async def list_research_briefs():
+    """Return summary list of all research briefs (no heavy content fields)."""
+    briefs = _load_briefs()
+    return [
+        {
+            "id":         b.get("id"),
+            "topic":      b.get("topic"),
+            "rt1_score":  b.get("rt1_score"),
+            "decision":   b.get("decision", "pending"),
+            "created_at": b.get("created_at"),
+        }
+        for b in sorted(briefs, key=lambda x: x.get("created_at", ""), reverse=True)
+    ]
+
+
+@app.get("/api/research/briefs/{brief_id}")
+async def get_research_brief(brief_id: str):
+    """Return full brief including R1 research, W1 synthesis, RT1 score + rationale."""
+    briefs = _load_briefs()
+    brief = next((b for b in briefs if b.get("id") == brief_id), None)
+    if not brief:
+        raise HTTPException(status_code=404, detail="Brief not found")
+
+    # Attempt to load content from companion markdown files if not embedded
+    def _try_load(field: str, glob_pattern: str) -> str:
+        if brief.get(field):
+            return brief[field]
+        for f in LOGS_RESEARCH_DIR.glob(glob_pattern):
+            try:
+                return f.read_text(encoding="utf-8")
+            except Exception:
+                pass
+        return ""
+
+    brief_id_short = brief_id[:8] if len(brief_id) >= 8 else brief_id
+    brief.setdefault("research",       _try_load("research",       f"*{brief_id_short}*_r1.md"))
+    brief.setdefault("synthesis",      _try_load("synthesis",      f"*{brief_id_short}*_w1.md"))
+    brief.setdefault("rt1_rationale",  _try_load("rt1_rationale",  f"*{brief_id_short}*_rt1.md"))
+
+    return brief
+
+
+@app.get("/api/research/staging")
+async def get_research_staging():
+    """Return items currently in the research staging queue."""
+    try:
+        items = staging.get_awaiting()
+        return [
+            {
+                "id":              item.get("id"),
+                "topic":           item.get("topic", ""),
+                "source_pipeline": item.get("source_pipeline", ""),
+                "created_at":      item.get("created_at", ""),
+            }
+            for item in items
+        ]
+    except Exception:
+        return []
+
+
+@app.get("/api/research/meta")
+async def get_research_meta():
+    """Return scheduler metadata: last SC1/SY1 run times and topic rotation state."""
+    schedule: Dict[str, Any] = {}
+    if RC_SCHEDULE_FILE.exists():
+        try:
+            schedule = json.loads(RC_SCHEDULE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    # Topic rotation list
+    topics: List[Dict[str, Any]] = []
+    if RC_TOPICS_FILE.exists():
+        try:
+            raw = json.loads(RC_TOPICS_FILE.read_text(encoding="utf-8"))
+            next_idx = schedule.get("next_topic_index", 0)
+            for i, t in enumerate(raw):
+                label = t if isinstance(t, str) else t.get("label", str(t))
+                topics.append({"label": label, "active": i == next_idx})
+        except Exception:
+            pass
+
+    return {
+        "last_sc1":          schedule.get("last_sc1_at"),
+        "last_sy1":          schedule.get("last_sy1_at"),
+        "last_triggered_at": schedule.get("last_triggered_at"),
+        "next_topic_index":  schedule.get("next_topic_index", 0),
+        "topics":            topics,
+    }
+
+
+class RCTriggerRequest(BaseModel):
+    topic: str = ""
+
+
+@app.post("/api/research/trigger")
+async def trigger_research_center(req: RCTriggerRequest):
+    """Queue a research-center pipeline run. Uses next scheduled topic if none given."""
+    # Resolve topic from rotation if not supplied
+    topic = req.topic.strip()
+    if not topic:
+        schedule: Dict[str, Any] = {}
+        if RC_SCHEDULE_FILE.exists():
+            try:
+                schedule = json.loads(RC_SCHEDULE_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        if RC_TOPICS_FILE.exists():
+            try:
+                raw = json.loads(RC_TOPICS_FILE.read_text(encoding="utf-8"))
+                idx = schedule.get("next_topic_index", 0) % max(len(raw), 1)
+                entry = raw[idx]
+                topic = entry if isinstance(entry, str) else entry.get("label", "")
+            except Exception:
+                pass
+        if not topic:
+            topic = "WesaTeam ecosystem updates"
+
+    task_id = f"rc-trigger-{uuid.uuid4().hex[:6]}"
+    task = {
+        "id":           task_id,
+        "type":         "coordinate",
+        "prompt":       f"START_PIPELINE:research-center TOPIC:{topic}",
+        "status":       "pending",
+        "created_at":   datetime.now().isoformat(),
+        "completed_at": "",
+        "result":       "",
+        "error":        "",
+        "model_used":   "",
+        "output_file":  "",
+    }
+    (TASKS_DIR / f"{task_id}.json").write_text(json.dumps(task, indent=2), encoding="utf-8")
+    return {"ok": True, "task_id": task_id, "topic": topic}
+
+
+class RCDecisionRequest(BaseModel):
+    brief_id: str
+    decision: str   # "approve" | "hold" | "discard"
+
+
+@app.post("/api/research/decision")
+async def set_research_decision(req: RCDecisionRequest):
+    """Set the Axel decision on a research brief (approve / hold / discard)."""
+    allowed = {"approve", "hold", "discard", "pending"}
+    decision = req.decision.strip().lower()
+    if decision not in allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid decision '{decision}'. Must be one of: {', '.join(sorted(allowed))}")
+
+    briefs = _load_briefs()
+    brief = next((b for b in briefs if b.get("id") == req.brief_id), None)
+    if not brief:
+        raise HTTPException(status_code=404, detail="Brief not found")
+
+    brief["decision"]    = decision
+    brief["decided_at"]  = datetime.now().isoformat()
+    _save_briefs(briefs)
+
+    # Also sync to staging queue if the brief lives there
+    try:
+        if decision == "approve":
+            staging.update_status(req.brief_id, "approved")
+        elif decision == "discard":
+            staging.update_status(req.brief_id, "discarded")
+    except Exception:
+        pass
+
+    return {"ok": True, "brief_id": req.brief_id, "decision": decision}
+
+
 
 class TaskSubmitRequest(BaseModel):
     type: str

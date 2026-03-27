@@ -394,6 +394,318 @@ const ReviewsPanel = () => {
     );
 };
 
+// ── RC score badge colours ─────────────────────────────────────────────────
+const rtColor = (score) => {
+    if (score === null || score === undefined) return 'var(--muted)';
+    if (score >= 80) return 'var(--done)';
+    if (score >= 60) return 'var(--in-progress)';
+    if (score >= 40) return 'var(--pending)';
+    return 'var(--failed)';
+};
+
+const decisionColor = (d) => ({
+    approve:  'var(--done)',
+    discard:  'var(--failed)',
+    hold:     'var(--pending)',
+    pending:  'var(--muted)',
+})[d?.toLowerCase()] || 'var(--muted)';
+
+const ResearchCenterPanel = ({ addToast }) => {
+    const [briefs,    setBriefs]    = React.useState([]);
+    const [staging,   setStaging]   = React.useState([]);
+    const [meta,      setMeta]      = React.useState(null);          // { last_sc1, last_sy1, topics[] }
+    const [selected,  setSelected]  = React.useState(null);          // full brief object
+    const [briefView, setBriefView] = React.useState('synthesis');   // 'synthesis'|'research'|'score'
+    const [loading,   setLoading]   = React.useState(true);
+    const [running,   setRunning]   = React.useState(false);
+
+    const load = React.useCallback(() => {
+        Promise.all([
+            apiFetch('/research/briefs').catch(() => []),
+            apiFetch('/research/staging').catch(() => []),
+            apiFetch('/research/meta').catch(() => null),
+        ]).then(([b, s, m]) => {
+            setBriefs(b);
+            setStaging(s);
+            setMeta(m);
+            setLoading(false);
+        });
+    }, []);
+
+    React.useEffect(() => { load(); const i = setInterval(load, 8000); return () => clearInterval(i); }, [load]);
+
+    const handleTrigger = async () => {
+        setRunning(true);
+        try {
+            const r = await apiFetch('/research/trigger', 'POST');
+            addToast(`RC pipeline queued — task: ${r.task_id}`, 'success');
+        } catch (err) {
+            addToast('Trigger failed: ' + err.message, 'error');
+        } finally {
+            setRunning(false);
+        }
+    };
+
+    const handleDecision = async (briefId, decision) => {
+        try {
+            await apiFetch('/research/decision', 'POST', { brief_id: briefId, decision });
+            addToast(`Brief ${briefId.substring(0,8)} marked: ${decision}`, 'info');
+            load();
+            if (selected && selected.id === briefId) setSelected(prev => ({ ...prev, decision }));
+        } catch (err) {
+            addToast('Decision failed: ' + err.message, 'error');
+        }
+    };
+
+    // counts
+    const counts = briefs.reduce((a, b) => {
+        const k = b.decision || 'pending';
+        a[k] = (a[k] || 0) + 1;
+        return a;
+    }, {});
+    const stagingCount = staging.length;
+
+    const selectBrief = async (brief) => {
+        if (selected && selected.id === brief.id) { setSelected(null); return; }
+        setSelected({ ...brief, _loading: true });
+        try {
+            const full = await apiFetch(`/research/briefs/${brief.id}`);
+            setSelected(full);
+        } catch {
+            setSelected({ ...brief, _error: true });
+        }
+    };
+
+    const scoreBar = (score) => {
+        if (score === null || score === undefined) return null;
+        const pct = Math.min(100, Math.max(0, score));
+        return (
+            <div style={{ height: '3px', background: 'var(--surface2)', borderRadius: '2px', marginTop: '4px', width: '100%' }}>
+                <div style={{ height: '100%', width: `${pct}%`, background: rtColor(score), borderRadius: '2px', transition: 'width 0.4s' }} />
+            </div>
+        );
+    };
+
+    if (loading) return <div className="designs-empty"><span>Loading Research Center...</span></div>;
+
+    return (
+        <div className="rc-layout">
+
+            {/* ── LEFT SIDEBAR ── */}
+            <div className="rc-sidebar">
+
+                {/* Queue stats */}
+                <div className="rc-sidebar-section">
+                    <div className="rc-section-label">Queue Status</div>
+                    <div className="rc-stat-grid">
+                        {[
+                            { label: 'Staging',  value: stagingCount,          color: 'var(--in-progress)' },
+                            { label: 'Pending',  value: counts.pending  || 0,  color: 'var(--pending)' },
+                            { label: 'Approved', value: counts.approve  || 0,  color: 'var(--done)' },
+                            { label: 'Discarded',value: counts.discard  || 0,  color: 'var(--failed)' },
+                        ].map(({ label, value, color }) => (
+                            <div key={label} className="rc-stat-cell">
+                                <div className="rc-stat-value" style={{ color }}>{value}</div>
+                                <div className="rc-stat-label">{label}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Scheduler meta */}
+                {meta && (
+                    <div className="rc-sidebar-section">
+                        <div className="rc-section-label">Scheduler</div>
+                        <div className="rc-meta-line"><span>SC1 last run</span><span>{meta.last_sc1 ? formatTimestamp(meta.last_sc1) : '—'}</span></div>
+                        <div className="rc-meta-line"><span>SY1 last run</span><span>{meta.last_sy1 ? formatTimestamp(meta.last_sy1) : '—'}</span></div>
+                        {meta.topics && meta.topics.length > 0 && <>
+                            <div className="rc-section-label" style={{ marginTop: '10px' }}>Topic Rotation</div>
+                            {meta.topics.map((t, i) => (
+                                <div key={i} className="rc-topic-item">
+                                    <span style={{ color: t.active ? 'var(--done)' : 'var(--muted)', marginRight: '6px' }}>{t.active ? '▶' : '·'}</span>
+                                    <span style={{ color: t.active ? 'var(--text)' : 'var(--muted)' }}>{t.label}</span>
+                                </div>
+                            ))}
+                        </>}
+                    </div>
+                )}
+
+                {/* Trigger button */}
+                <div className="rc-sidebar-section">
+                    <button
+                        onClick={handleTrigger}
+                        disabled={running}
+                        className="btn-primary"
+                        style={{ width: '100%', padding: '10px 16px', fontSize: '0.72em' }}
+                    >
+                        {running ? 'Queuing...' : '▶ Trigger RC Run'}
+                    </button>
+                    <button onClick={load} style={{ width: '100%', marginTop: '6px', fontSize: '0.68em', padding: '6px' }}>Refresh</button>
+                </div>
+
+                {/* Staging queue */}
+                {staging.length > 0 && (
+                    <div className="rc-sidebar-section">
+                        <div className="rc-section-label">Staging Queue ({staging.length})</div>
+                        {staging.map(s => (
+                            <div key={s.id || s.topic} className="rc-staging-item">
+                                <span style={{ color: 'var(--in-progress)', marginRight: '5px' }}>◈</span>
+                                <span style={{ fontSize: '0.75em', color: 'var(--text)', fontFamily: 'var(--font-mono)' }}>{s.topic || s.id}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* ── BRIEF LIST ── */}
+            <div className="rc-brief-list">
+                <div className="rc-list-header">Research Briefs ({briefs.length})</div>
+                {briefs.length === 0 && (
+                    <div style={{ padding: '20px 14px', color: 'var(--muted)', fontSize: '0.78em', fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}>
+                        No briefs yet. Trigger a RC run to generate the first brief.
+                    </div>
+                )}
+                {briefs.map(b => {
+                    const isSelected = selected && selected.id === b.id;
+                    return (
+                        <div
+                            key={b.id}
+                            className={`rc-brief-item ${isSelected ? 'active' : ''}`}
+                            onClick={() => selectBrief(b)}
+                        >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
+                                <span className="rc-brief-topic">{b.topic || b.id.substring(0, 20)}</span>
+                                {b.rt1_score !== null && b.rt1_score !== undefined && (
+                                    <span className="rc-score-badge" style={{ color: rtColor(b.rt1_score), borderColor: rtColor(b.rt1_score) }}>
+                                        {b.rt1_score}
+                                    </span>
+                                )}
+                            </div>
+                            {scoreBar(b.rt1_score)}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '5px' }}>
+                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65em', color: 'var(--muted)', letterSpacing: '0.04em' }}>
+                                    {formatTimestamp(b.created_at)}
+                                </span>
+                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65em', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: decisionColor(b.decision) }}>
+                                    {b.decision || 'pending'}
+                                </span>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* ── DETAIL PANE ── */}
+            <div className="rc-detail">
+                {!selected ? (
+                    <div className="no-task-selected">— select a brief to inspect —</div>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+
+                        {/* Detail tabs */}
+                        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, padding: '0 4px', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex' }}>
+                                {[
+                                    { key: 'synthesis', label: 'Synthesis' },
+                                    { key: 'research',  label: 'R1 Research' },
+                                    { key: 'score',     label: 'RT1 Score' },
+                                ].map(({ key, label }) => (
+                                    <button
+                                        key={key}
+                                        onClick={() => setBriefView(key)}
+                                        style={{
+                                            background: 'none', border: 'none',
+                                            borderBottom: briefView === key ? '2px solid var(--done)' : '2px solid transparent',
+                                            color: briefView === key ? 'var(--done)' : 'var(--muted)',
+                                            padding: '9px 16px', fontSize: '0.72em', fontWeight: 700,
+                                            letterSpacing: '0.1em', cursor: 'pointer', textTransform: 'uppercase',
+                                            fontFamily: 'var(--font-ui)', marginBottom: '-1px', borderRadius: 0,
+                                        }}
+                                    >{label}</button>
+                                ))}
+                            </div>
+
+                            {/* Decision buttons */}
+                            {!selected._loading && !selected._error && (
+                                <div style={{ display: 'flex', gap: '6px', padding: '6px 8px' }}>
+                                    {['approve', 'hold', 'discard'].map(d => (
+                                        <button
+                                            key={d}
+                                            onClick={() => handleDecision(selected.id, d)}
+                                            style={{
+                                                fontSize: '0.62em', padding: '3px 10px',
+                                                background: (selected.decision === d) ? decisionColor(d) : 'transparent',
+                                                color: (selected.decision === d) ? '#000' : decisionColor(d),
+                                                border: `1px solid ${decisionColor(d)}`,
+                                                borderRadius: '1px', cursor: 'pointer',
+                                                fontFamily: 'var(--font-mono)', letterSpacing: '0.08em', textTransform: 'uppercase',
+                                            }}
+                                        >{d}</button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Brief header */}
+                        <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
+                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7em', color: 'var(--muted)', letterSpacing: '0.04em' }}>#{selected.id ? selected.id.substring(0,8) : '—'}</span>
+                                <span style={{ fontFamily: 'var(--font-ui)', fontSize: '0.88em', fontWeight: 700, color: 'var(--text)' }}>{selected.topic || '—'}</span>
+                                {selected.rt1_score !== null && selected.rt1_score !== undefined && (
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8em', fontWeight: 700, color: rtColor(selected.rt1_score), letterSpacing: '0.06em' }}>
+                                        RT1: {selected.rt1_score}/100
+                                    </span>
+                                )}
+                                <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: '0.65em', color: 'var(--muted)' }}>{formatTimestamp(selected.created_at)}</span>
+                            </div>
+                        </div>
+
+                        {/* Content */}
+                        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
+                            {selected._loading && <div style={{ color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: '0.82em', letterSpacing: '0.06em' }}>Loading brief...</div>}
+                            {selected._error  && <div style={{ color: 'var(--failed)', fontFamily: 'var(--font-mono)', fontSize: '0.82em' }}>Failed to load brief content.</div>}
+                            {!selected._loading && !selected._error && <>
+                                {briefView === 'synthesis' && (
+                                    <pre className="task-detail-pre" style={{ maxHeight: 'none' }}>
+                                        {selected.synthesis || selected.w1_output || '— no synthesis content —'}
+                                    </pre>
+                                )}
+                                {briefView === 'research' && (
+                                    <pre className="task-detail-pre" style={{ maxHeight: 'none' }}>
+                                        {selected.research || selected.r1_output || '— no R1 research content —'}
+                                    </pre>
+                                )}
+                                {briefView === 'score' && (
+                                    <div>
+                                        {(selected.rt1_score !== null && selected.rt1_score !== undefined) ? (<>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
+                                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '2.2em', fontWeight: 700, color: rtColor(selected.rt1_score) }}>
+                                                    {selected.rt1_score}
+                                                </div>
+                                                <div>
+                                                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7em', color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>RT1 Relevance Score</div>
+                                                    <div style={{ height: '6px', width: '200px', background: 'var(--surface2)', borderRadius: '3px', marginTop: '6px' }}>
+                                                        <div style={{ height: '100%', width: `${selected.rt1_score}%`, background: rtColor(selected.rt1_score), borderRadius: '3px', transition: 'width 0.4s' }} />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {selected.rt1_rationale && (
+                                                <pre className="task-detail-pre" style={{ maxHeight: 'none' }}>{selected.rt1_rationale}</pre>
+                                            )}
+                                        </>) : (
+                                            <div style={{ color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: '0.82em', letterSpacing: '0.06em' }}>— RT1 score not yet available —</div>
+                                        )}
+                                    </div>
+                                )}
+                            </>}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
 const App = () => {
     const [tasks, setTasks] = useState([]);
     const [selectedTaskId, setSelectedTaskId] = useState(null);
@@ -473,6 +785,7 @@ const App = () => {
                 <button className={activeTab==='designs'   ?'active':''} onClick={() => setActiveTab('designs')}>Designs</button>
                 <button className={activeTab==='reviews'   ?'active':''} onClick={() => setActiveTab('reviews')}>Q1 Reviews</button>
                 <button className={activeTab==='pipelines' ?'active':''} onClick={() => setActiveTab('pipelines')}>Pipelines</button>
+                <button className={activeTab==='rc'        ?'active':''} onClick={() => setActiveTab('rc')}>Research Center</button>
                 <button className={activeTab==='axellog'   ?'active':''} onClick={() => setActiveTab('axellog')}>Axel Log</button>
                 <button className={activeTab==='help'      ?'active':''} onClick={() => setActiveTab('help')}>Help</button>
             </div>
@@ -489,6 +802,7 @@ const App = () => {
             {activeTab === 'designs'   && <div className="main-content"><DesignsPanel addToast={addToast} /></div>}
             {activeTab === 'reviews'   && <div className="main-content"><ReviewsPanel /></div>}
             {activeTab === 'pipelines' && <div className="main-content"><PipelineLauncherPanel addToast={addToast} /></div>}
+            {activeTab === 'rc'        && <div className="main-content"><ResearchCenterPanel addToast={addToast} /></div>}
             {activeTab === 'axellog'   && <div className="main-content" style={{ display:'flex', flexDirection:'column', padding:0 }}><AxelLogPanel /></div>}
             {activeTab === 'help'      && <div className="main-content"><HelpPanel /></div>}
             <Toast toasts={toasts} onRemoveToast={removeToast} />
