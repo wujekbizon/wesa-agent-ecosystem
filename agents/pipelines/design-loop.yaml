@@ -1,6 +1,7 @@
 name: design-loop
-description: "Automated design improvement loop. R1 research (once, 3 ranked directions) → UX1 picks most original direction and prototypes → Q1 review → SU1 skill update → loops back to UX1 until Q1 scores 72/80 (9/10 avg) or max iterations reached."
+description: "Automated design improvement loop. R1 research (3 ranked directions) → UX1 picks best direction and prototypes → Q1 reviews → SU1 updates overlay → loops back to UX1 until Q1 scores 72/80 or max iterations reached."
 trigger: manual
+
 stages:
   - id: research
     agent: r1
@@ -48,14 +49,35 @@ stages:
       Q1 FEEDBACK FROM PREVIOUS ITERATION:
       {stage.review}
 
-      ACCUMULATED DESIGN TIPS FROM THIS RUN (built up by SU1 after each Q1 review):
+      ACCUMULATED DESIGN TIPS FROM THIS RUN:
       {read_file:WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md}
 
       INSTRUCTIONS:
-      - Iteration 1 (no Q1 feedback above): R1 has provided 3 ranked directions above. Select DIRECTION 1 (highest originality score). Commit to it fully — use its exact color palette, typography stack, layout principle, and UI patterns. Do not blend directions or substitute. Produce a fresh, fully realized prototype.
-      - Iteration 2+ (Q1 feedback present): DO NOT restart or change design direction. Keep the creative direction, visual identity, color palette, and overall concept intact. Address only Q1's specific failures listed under "What Failed". Raise the floor — do not move the ceiling.
-      - Apply all accumulated tips above — they represent everything Q1 has flagged across prior iterations of this run.
-      - Output: complete single-file HTML only. No explanation text before or after.
+
+      If this is iteration 1 (Q1 feedback above is empty):
+      - Read all 3 directions R1 provided. Choose the one you judge most original and most
+        fitting for this product. You are not required to pick Direction 1 — make the best
+        creative choice and state your reasoning in the design rationale comment block.
+      - Commit to it fully: use its exact color palette, typography stack, layout principle,
+        and UI patterns. Do not blend directions or substitute defaults.
+      - Produce a fully realized prototype. Apply all accumulated overlay tips above.
+
+      If this is iteration 2+ (Q1 feedback is present):
+      - First check Q1's scores for Originality and Emotional Register in the feedback above.
+      - If BOTH scored 6 or above: keep the creative direction fully intact. Address only
+        the specific failures listed under "What Failed". Raise the floor, do not move the ceiling.
+      - If EITHER scored below 6 AND Q1 explicitly states the direction is a concept-level
+        failure: switch to the next unused R1 direction (Direction 1 used → try Direction 2,
+        Direction 2 used → try Direction 3). State the switch and reason in the design
+        rationale comment block. Start fresh with the new direction's palette, typography,
+        and layout — do not carry over the old aesthetic.
+      - If EITHER scored below 6 but Q1 says it is salvageable: attempt one more iteration
+        addressing Q1's specific failures before considering a direction switch.
+
+      Always apply all accumulated overlay tips — they represent everything Q1 has flagged
+      across prior iterations of this run.
+
+      Output: complete single-file HTML only. No explanation text before or after.
     output_file: "WesaTeam/agent-ecosystem/static/designs/{run_id}_v{iteration}_prototype.html"
 
   - id: review
@@ -63,8 +85,8 @@ stages:
     task_type: review
     prompt_template: |
       You are Q1 — an independent design critic, not part of the team that built this.
-      Your job is to assess quality with the same rigour a senior creative director would bring to a portfolio review.
-      You have no stake in this work. You call it as you see it.
+      Your job is to assess quality with the same rigour a senior creative director would
+      bring to a portfolio review. You have no stake in this work. You call it as you see it.
 
       Score this HTML prototype for: {topic}
 
@@ -73,9 +95,17 @@ stages:
       Component Consistency, Craft & Finish, Originality, Emotional Register
 
       For each dimension: score + 2-sentence justification.
-      Then: a "What Worked" section (top 3 genuine strengths) and a "What Failed" section (top 3 failures, specific).
+      Then: a "What Worked" section (top 3 genuine strengths) and a "What Failed" section
+      (top 3 failures, specific and referencing actual elements by class name or visible text).
       End with: TOTAL SCORE: X/80 and TOP 3 IMPROVEMENTS (specific and actionable).
-      Also include: SKILL UPDATE RECOMMENDATIONS — 1-3 universal rules SU1 should add to UX1's skill file.
+
+      For TOP 3 IMPROVEMENTS: if Originality or Emotional Register scored below 6, explicitly
+      state whether you believe the direction is salvageable through execution fixes alone,
+      or whether it is a concept-level failure that warrants trying a different direction.
+
+      Also include: SKILL UPDATE RECOMMENDATIONS — 2-5 universal rules formatted as:
+      RULE: [imperative statement]
+      REASON: [one sentence why]
 
       Prototype HTML:
       {prev_output}
@@ -88,12 +118,15 @@ stages:
       Q1 reviewed iteration {iteration} of run {run_id}.
       Your job: update the run-scoped overlay file — DO NOT touch ux_agent.yaml.
 
-      The overlay is a cumulative list of universal design tips UX1 reads on every iteration of this run.
-      Extract universal design principles from Q1's SKILL UPDATE RECOMMENDATIONS.
-      Merge with any existing overlay tips below — do not duplicate, do not add product-specific rules.
-      Keep it tight: max 10 tips total, most impactful only.
+      The overlay is a cumulative list of universal design tips UX1 reads on every iteration
+      of this run. Extract universal design principles from Q1's SKILL UPDATE RECOMMENDATIONS.
+      Merge with any existing overlay tips — do not duplicate, do not add product-specific rules.
 
-      Previous overlay (empty on iteration 1 means start fresh):
+      When the overlay exceeds 10 tips, remove the least impactful ones to stay at 10.
+      Least impactful means: most narrow in scope, most product-specific, or already implied
+      by a stronger existing tip.
+
+      Previous overlay:
       {read_file:WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md}
 
       Q1 Review:
@@ -108,10 +141,15 @@ stages:
     agent: su1
     task_type: skill_merge
     prompt_template: |
-      A design for "{topic}" was approved after {iteration} iterations (score >= 72/80).
-      Your job: permanently merge the run's accumulated tips into ux_agent.yaml.
+      A design for "{topic}" completed after {iteration} iterations.
 
-      Rules:
+      IMPORTANT: Only proceed with the merge if the Q1 review below contains a total score
+      of 72/80 or higher. If the score is below 72, output the following exactly and nothing else:
+      MERGE_SKIPPED — score below approval threshold.
+
+      If the score is 72 or above, permanently merge the run's accumulated tips into ux_agent.yaml.
+
+      Merge rules:
       - Only merge rules that are universal — apply to any UI design, not just this product
       - Merge with existing content — do not bloat, do not duplicate
       - If a new tip overlaps an existing rule, sharpen the existing one instead of adding
@@ -121,12 +159,12 @@ stages:
       Current ux_agent.yaml:
       {read_file:WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml}
 
-      Accumulated run tips (all {iteration} iterations of this run):
+      Accumulated run tips:
       {read_file:WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md}
 
-      Winning Q1 review (the review that crossed 72/80):
+      Winning Q1 review:
       {stage.review}
     output_file: "WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml"
 
-max_iterations: 8
+max_iterations: 12
 notify_on_complete: true

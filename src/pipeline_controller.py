@@ -283,7 +283,18 @@ class PipelineController:
             encoding="utf-8",
         )
 
-        queue.sync_json_to_db() if hasattr(queue, "sync_json_to_db") else None
+        queue.import_task({
+            "id": task.id,
+            "type": task_type.value,
+            "prompt": prompt,
+            "output_file": output_file,
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "result": "",
+            "error": "",
+            "model_used": "",
+            "completed_at": "",
+        })
         return task.id
 
     def _save_state(self, state_file: Path, state: dict) -> None:
