@@ -42,7 +42,7 @@ class GeminiAgent:
         self.use_web_search = use_web_search
 
     def run(self, prompt: str, server_configs: list[dict] | None = None) -> str:
-        MAX_TURNS = 10
+        MAX_TURNS = 20 if self.agent_name in ("r1", "R1") else 10
 
         def _call_no_tools() -> str:
             config_args = {"system_instruction": self.system_prompt}
@@ -117,7 +117,7 @@ class GeminiAgent:
                 contents.append(types.Content(role="tool", parts=tool_response_parts))
 
                 if turn == MAX_TURNS - 1:
-                    result_text = f"{response.text or ''} [WARN: MAX_TURNS reached]".strip()
+                    raise RuntimeError(f"{self.agent_name} hit MAX_TURNS ({MAX_TURNS}) — research incomplete")
 
             mcp.close()
             return result_text

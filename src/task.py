@@ -7,7 +7,7 @@ The daemon picks it up, processes it, and writes results to logs/.
 import json
 import uuid
 from datetime import datetime
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from enum import Enum
 from pathlib import Path
 
@@ -62,7 +62,9 @@ class Task:
     @classmethod
     def from_file(cls, path: Path) -> "Task":
         data = json.loads(path.read_text(encoding="utf-8"))
-        return cls(**data)
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
+        
 
     def save(self, path: Path):
         path.write_text(self.to_json(), encoding="utf-8")

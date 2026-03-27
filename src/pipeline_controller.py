@@ -120,7 +120,7 @@ class PipelineController:
         # Store this stage's result
         state["stage_outputs"][stage_id] = result
 
-        # Handle push_to_staging action before checking stop/loop
+        # --- push_to_staging (existing — unchanged, used by other pipelines) ---
         if current_stage.get("stage_action") == "push_to_staging" and self.staging_queue:
             self.staging_queue.add_brief(
                 topic=state.get("topic", pipeline_name),
@@ -128,6 +128,10 @@ class PipelineController:
                 raw_research=state["stage_outputs"].get(stages[0].get("id", "stage_0"), ""),
                 source_pipeline=pipeline_name,
             )
+
+        # --- rt1_route (new — Research Center routing via RT1) ---
+        if current_stage.get("stage_action") == "rt1_route":
+            self._queue_rt1_task(state, result, stages, queue)
 
         # Evaluate stop condition
         stop_cond_met = self._eval_stop_if(current_stage.get("stop_if", ""), result, state)
@@ -168,6 +172,54 @@ class PipelineController:
         self._save_state(state_file, state)
         return None
 
+    def _queue_rt1_task(self, state: dict, brief_content: str, stages: list, queue: TaskQueue) -> None:
+        """
+        Queue an RT1 routing task after W1 synthesis completes.
+        The task carries _rt1_meta so the daemon can dispatch it without
+        needing to re-read pipeline state.
+        """
+        run_id = state["run_id"]
+        topic = state.get("topic", "")
+        raw_research = state["stage_outputs"].get(stages[0].get("id", "stage_0"), "")
+
+        rt1_task_id = f"{run_id}-rt1-route"
+        rt1_task = {
+            "id": rt1_task_id,
+            "type": "analyze",
+            "prompt": f"START_RT1:{run_id}",
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "result": "",
+            "error": "",
+            "model_used": "",
+            "completed_at": "",
+            "_rt1_meta": {
+                "topic": topic,
+                "brief_content": brief_content,
+                "raw_research": raw_research,
+                "pipeline": state["pipeline"],
+                "run_id": run_id,
+            },
+        }
+
+        task_file = self.tasks_dir / f"{rt1_task_id}.json"
+        task_file.write_text(
+            json.dumps(rt1_task, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        queue.import_task(rt1_task)
+
+        # Mark topic complete in rc_queue
+        try:
+            from src.rc_queue_manager import load_queue, save_queue, complete_topic
+            rc_queue = load_queue()
+            for t in rc_queue.get("in_progress", []):
+                if t.get("title", "").lower() == topic.lower():
+                    complete_topic(rc_queue, t["id"])
+                    break
+            save_queue(rc_queue)
+        except Exception as e:
+            print(f"[PipelineController] rc_queue complete_topic failed: {e}")
+
     def _complete(self, state_file: Path, state: dict, pipeline_def: dict, stop_reason: str) -> Optional[dict]:
         """Mark pipeline done and return notification dict if notify_on_complete is set."""
         self._mark_done(state_file, state, stop_reason)
@@ -192,7 +244,6 @@ class PipelineController:
             return False
 
         def _extract_score(text: str):
-            # Match any number (int or float) immediately before /80 with optional spaces
             m = re.search(r"(\d+(?:\.\d+)?)\s*/\s*80", text, re.IGNORECASE)
             if m:
                 return int(float(m.group(1)))
@@ -234,7 +285,7 @@ class PipelineController:
         # Substitute {stage.<id>} with outputs from previously completed stages
         for completed_stage_id, stage_output in state.get("stage_outputs", {}).items():
             prompt = prompt.replace(f"{{stage.{completed_stage_id}}}", stage_output)
-        # Clear any {stage.*} placeholders for stages not yet run (e.g. {stage.review} on iteration 1)
+        # Clear any {stage.*} placeholders for stages not yet run
         prompt = re.sub(r"\{stage\.[^}]+\}", "", prompt)
 
         # Substitute {read_file:<path>} with file contents (path relative to workspace_root)
