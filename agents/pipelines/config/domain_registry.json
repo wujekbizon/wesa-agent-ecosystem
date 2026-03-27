@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-03-27",
+  "domains": [
+    {
+      "id": "agent-ecosystem",
+      "name": "AI agent ecosystems & orchestration",
+      "active": true,
+      "weight": 1.0,
+      "why": "Core business — WesaTeam infrastructure, daemon reliability, task routing, agent quality",
+      "escalation_threshold_override": null,
+      "sources": [
+        "https://news.ycombinator.com",
+        "https://www.deeplearning.ai/the-batch/",
+        "https://importai.substack.com",
+        "https://arxiv.org/list/cs.AI/recent"
+      ]
+    },
+    {
+      "id": "saas-marketplace",
+      "name": "SaaS marketplace design & AgentHire",
+      "active": true,
+      "weight": 1.0,
+      "why": "Active build — agenthire.eu, SaaS agent marketplace patterns, 2026 competitor landscape",
+      "escalation_threshold_override": null,
+      "sources": [
+        "https://www.producthunt.com",
+        "https://changelog.com",
+        "https://github.com/trending"
+      ]
+    },
+    {
+      "id": "edu-ai",
+      "name": "AI in education & EdTech",
+      "active": true,
+      "weight": 0.9,
+      "why": "Direct product relevance — Wolfmed platform, adaptive learning, tutoring systems",
+      "escalation_threshold_override": null,
+      "preferred_languages": ["en", "pl", "de"],
+      "sources": [
+        "https://arxiv.org/list/cs.HC/recent",
+        "https://ssrn.com/en/",
+        "https://www.edsurge.com"
+      ]
+    },
+    {
+      "id": "ai-frontier",
+      "name": "Broad AI & tech frontier",
+      "active": true,
+      "weight": 0.7,
+      "why": "Strategic awareness and competitive positioning — model releases, policy, infrastructure",
+      "escalation_threshold_override": 19.0,
+      "sources": [
+        "https://arxiv.org/list/cs.LG/recent",
+        "https://techcrunch.com/category/artificial-intelligence/",
+        "https://www.wired.com/tag/artificial-intelligence/"
+      ]
+    }
+  ],
+  "notes": "Add new domains by appending to this array. No YAML or agent changes required. Set active: false to pause a domain without removing it. escalation_threshold_override replaces the global 17.5 threshold for that domain if set."
+}

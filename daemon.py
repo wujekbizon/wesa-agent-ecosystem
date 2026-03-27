@@ -33,6 +33,7 @@ Changes in v0.8:
 """
 
 import os
+import queue
 import signal
 import threading
 import concurrent.futures
@@ -69,6 +70,12 @@ RC_INTERVAL_HOURS = int(os.environ.get("RC_INTERVAL_HOURS", "4"))
 RC_SCHEDULE_FILE = LOGS_DIR / "rc_schedule.json"
 RC_PIPELINE_NAME = "research-center"
 RC_ENABLED_FILE = LOGS_DIR / "rc_enabled.flag"  # exists = enabled, absent = disabled
+SC1_INTERVAL_HOURS = int(os.environ.get("SC1_INTERVAL_HOURS", "2"))
+SC1_PIPELINE_NAME = "sc1-scout"
+SY1_INTERVAL_HOURS = int(os.environ.get("SY1_INTERVAL_HOURS", "24"))
+SY1_PIPELINE_NAME = "sy1-synthesis"
+SC1_SCHEDULE_FILE = LOGS_DIR / "sc1_schedule.json"
+SY1_SCHEDULE_FILE = LOGS_DIR / "sy1_schedule.json"
 
 # Route task type → log subfolder
 TASK_TYPE_LOG_DIR = {
@@ -92,8 +99,9 @@ TASK_TYPE_LOG_DIR = {
 # Git repo root: the agent-ecosystem folder (where daemon.py lives)
 REPO_DIR = Path(__file__).parent
 
-# Workspace root: three levels up from daemon.py = Coworker/
-WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
+# Workspace root: three levels up from daemon.py = WesaTeam/
+WORKSPACE_ROOT = Path(__file__).resolve().parent
+print(f"[DEBUG] WORKSPACE_ROOT = {WORKSPACE_ROOT}")
 
 # Shared lock for all state writes (SQLite, pipeline_ctrl, briefing file).
 # Held only during short DB/file update windows — never during agent.run().
@@ -121,7 +129,13 @@ def log(msg: str):
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"[{timestamp}] {msg}")
 
-
+def _try_load_raw(task_path: Path) -> dict:
+    """Load raw task JSON without Task class parsing (to read _rt1_meta etc.)"""
+    try:
+        return json.loads(task_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+ 
 def sync_json_to_db(queue: TaskQueue):
     """Import any JSON task files not yet tracked in SQLite."""
     for f in TASKS_DIR.glob("*.json"):
@@ -131,7 +145,17 @@ def sync_json_to_db(queue: TaskQueue):
                 queue.import_task(data)
         except Exception as e:
             log(f"sync_json_to_db: failed on {f.name}: {e}")
-
+            
+def _get_pipeline_name_for_task(task_id: str, pipeline_ctrl: PipelineController) -> str:
+    """Return the pipeline name for a given task_id, or '' if not found."""
+    for f in pipeline_ctrl.running_dir.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if data.get("current_task_id") == task_id or task_id.startswith(data.get("run_id", "___")):
+                return data.get("pipeline", "")
+        except Exception:
+            pass
+    return ""
 
 def update_briefing(queue: TaskQueue):
     """Rebuild Axel's briefing file from SQLite. Called after every task completes."""
@@ -405,50 +429,108 @@ def _rc_pipeline_running(pipeline_ctrl: PipelineController) -> bool:
 
 
 def auto_run_research_center(pipeline_ctrl: PipelineController, queue: TaskQueue):
-    """
-    Called on every daemon poll. Fires the next RC topic when:
-    - RC_ENABLED_FILE exists (scheduler is on)
-    - No RC pipeline is currently running
-    - At least RC_INTERVAL_HOURS have passed since last trigger
-    """
     if not RC_ENABLED_FILE.exists():
         return
-    # Load RC pipeline definition to get topics list
+ 
     rc_yaml_path = pipeline_ctrl.pipelines_dir / f"{RC_PIPELINE_NAME}.yaml"
     if not rc_yaml_path.exists():
         return
-    try:
-        with open(rc_yaml_path, "r", encoding="utf-8") as f:
-            rc_def = yaml.safe_load(f)
-    except Exception:
-        return
-
-    topics = rc_def.get("topics", [])
-    if not topics:
-        return
-
+ 
     if _rc_pipeline_running(pipeline_ctrl):
         return
-
+ 
     schedule = _load_rc_schedule()
     last_run = schedule.get("last_triggered_at")
     if last_run:
         elapsed = datetime.now() - datetime.fromisoformat(last_run)
         if elapsed < timedelta(hours=RC_INTERVAL_HOURS):
             return
-
-    # Pick next topic (round-robin)
-    idx = schedule.get("next_topic_index", 0) % len(topics)
-    topic = topics[idx]
-
-    log(f"[RC Auto] Triggering research-center — topic {idx + 1}/{len(topics)}: {topic[:60]}...")
+ 
+    # Try dynamic queue first
+    from src.rc_queue_manager import load_queue, save_queue, next_topic
+    rc_queue = load_queue()
+    topic_entry = next_topic(rc_queue)
+ 
+    if topic_entry:
+        topic = topic_entry["title"]
+        save_queue(rc_queue)
+        log(f"[RC Auto] Queue topic: {topic[:60]} (score={topic_entry.get('composite_score', 0):.1f}, priority={topic_entry.get('priority')})")
+    else:
+        # Fallback: round-robin from static topics list in YAML
+        try:
+            with open(rc_yaml_path, "r", encoding="utf-8") as f:
+                rc_def = yaml.safe_load(f)
+        except Exception:
+            return
+        topics = rc_def.get("topics", [])
+        if not topics:
+            return
+        idx = schedule.get("next_topic_index", 0) % len(topics)
+        topic = topics[idx]
+        schedule["next_topic_index"] = (idx + 1) % len(topics)
+        log(f"[RC Auto] Queue empty — fallback topic {idx + 1}/{len(topics)}: {topic[:60]}")
+ 
     try:
         pipeline_ctrl.start_pipeline(RC_PIPELINE_NAME, queue, topic)
-        schedule["next_topic_index"] = (idx + 1) % len(topics)
         schedule["last_triggered_at"] = datetime.now().isoformat()
         _save_rc_schedule(schedule)
     except Exception as e:
         log(f"[RC Auto] Failed to start pipeline: {e}")
+
+def auto_run_scouts(pipeline_ctrl: PipelineController, queue: TaskQueue):
+    """Fire SC1 scout every SC1_INTERVAL_HOURS and SY1 once daily if RC is enabled."""
+    if not RC_ENABLED_FILE.exists():
+        return
+ 
+    def _should_run(schedule_file: Path, interval_hours: int) -> bool:
+        if not schedule_file.exists():
+            return True
+        try:
+            data = json.loads(schedule_file.read_text(encoding="utf-8"))
+            last = data.get("last_run")
+            if last:
+                return datetime.now() - datetime.fromisoformat(last) >= timedelta(hours=interval_hours)
+        except Exception:
+            pass
+        return True
+ 
+    def _mark_run(schedule_file: Path):
+        schedule_file.write_text(
+            json.dumps({"last_run": datetime.now().isoformat()}, indent=2), encoding="utf-8"
+        )
+ 
+    # SC1 scout
+    if SC1_PIPELINE_NAME in pipeline_ctrl._pipelines and _should_run(SC1_SCHEDULE_FILE, SC1_INTERVAL_HOURS):
+        # Check no SC1 run is already in flight
+        sc1_running = any(
+            json.loads(f.read_text()).get("pipeline") == SC1_PIPELINE_NAME and
+            json.loads(f.read_text()).get("status") == "running"
+            for f in pipeline_ctrl.running_dir.glob("*.json")
+            if f.read_text()
+        )
+        if not sc1_running:
+            try:
+                pipeline_ctrl.start_pipeline(SC1_PIPELINE_NAME, queue, "")
+                _mark_run(SC1_SCHEDULE_FILE)
+                log(f"[SC1] Scout run started")
+            except Exception as e:
+                log(f"[SC1] Failed to start: {e}")
+ 
+    # SY1 synthesis
+    if SY1_PIPELINE_NAME in pipeline_ctrl._pipelines and _should_run(SY1_SCHEDULE_FILE, SY1_INTERVAL_HOURS):
+        sy1_running = any(
+            json.loads(f.read_text()).get("pipeline") == SY1_PIPELINE_NAME and
+            json.loads(f.read_text()).get("status") == "running"
+            for f in pipeline_ctrl.running_dir.glob("*.json")
+            if f.read_text()
+        )
+        if not sy1_running:
+            try:
+                pipeline_ctrl.start_pipeline(SY1_PIPELINE_NAME, queue, "")
+                _mark_run(SY1_SCHEDULE_FILE)
+                log(f"[SY1] Synthesis run started")
+            except Exception as e:
+                log(f"[SY1] Failed to start: {e}")
 
 
 def append_pipeline_notification(completion: dict):
@@ -506,14 +588,17 @@ def _claim_task(task_path: Path, queue: TaskQueue) -> "Task | None":
         raw = json.loads(task_path.read_text(encoding="utf-8"))
         retry_after = raw.get("retry_after")
         if retry_after and datetime.now() < datetime.fromisoformat(retry_after):
-            return None  # not yet time to retry
+            return None
     except Exception:
         pass
     task = Task.from_file(task_path)
     if task.status != TaskStatus.PENDING:
         return None
     task.status = TaskStatus.IN_PROGRESS
-    task.save(task_path)
+    # Preserve unknown fields like _rt1_meta when writing back
+    data = json.loads(task_path.read_text(encoding="utf-8"))
+    data.update(json.loads(task.to_json()))
+    task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     queue.update_status(task.id, "in_progress")
     return task
 
@@ -550,7 +635,7 @@ def _schedule_retry(task: Task, task_path: Path) -> bool:
     return True
 
 
-def process_task(task: Task, task_path: Path, router: Router, queue: TaskQueue, pipeline_ctrl: PipelineController):
+def process_task(task: Task, task_path: Path, router: Router, queue: TaskQueue, pipeline_ctrl: PipelineController, staging: StagingQueue):
     """Execute a pre-claimed task. Task is already IN_PROGRESS when this is called."""
     task_type_str = str(task.type).replace("TaskType.", "")
 
@@ -606,8 +691,59 @@ def process_task(task: Task, task_path: Path, router: Router, queue: TaskQueue, 
             update_briefing(queue)
         return
 
-    log(f"Processing task {task.id} [{task.type}] ...")
+    if task_type_str == "analyze" and task.prompt.startswith("START_RT1:"):
+        import json as _json
+        from src.rc_queue_manager import handle_rt1_result
+ 
+        meta = raw.get("_rt1_meta", {}) if (raw := _try_load_raw(task_path)) else {}
+        topic = meta.get("topic", task.prompt)
+        brief_content = meta.get("brief_content", "")
+        raw_research = meta.get("raw_research", "")
+ 
+        # Build RT1 prompt and run it through the router
+        rt1_pipeline = pipeline_ctrl._pipelines.get("rt1-router")
+        if rt1_pipeline:
+            rt1_prompt = (
+                rt1_pipeline["stages"][0]["prompt_template"]
+                .replace("{topic}", topic)
+                .replace("{prev_output}", brief_content)
+            )
+            # Resolve read_file placeholders
+            import re as _re
+            for m in _re.finditer(r"\{read_file:([^}]+)\}", rt1_prompt):
+                rp = WORKSPACE_ROOT / m.group(1).strip()
+                try:
+                    rt1_prompt = rt1_prompt.replace(m.group(0), rp.read_text(encoding="utf-8"))
+                except Exception:
+                    rt1_prompt = rt1_prompt.replace(m.group(0), "[file not found]")
+ 
+            rt1_task = Task(prompt=rt1_prompt, type=task.type)
+            rt1_result, model_used = router.run(rt1_task)
+        else:
+            rt1_result = '{"decision":"AUTO-SAVE","composite_score":0,"reason":"rt1-router pipeline not loaded"}'
+            model_used = "fallback"
+ 
+        decision = handle_rt1_result(
+            rt1_output=rt1_result,
+            topic=topic,
+            brief_content=brief_content,
+            raw_research=raw_research,
+            staging_queue=staging,
+        )
+ 
+        task.status = TaskStatus.DONE
+        task.result = f"RT1 decision: {decision}\n\n{rt1_result}"
+        task.model_used = model_used
+        task.completed_at = datetime.now().isoformat()
+        task.save(task_path)
+        with _state_lock:
+            queue.update_status(task.id, "done", result=task.result, model_used=model_used)
+            update_briefing(queue)
+        log(f"[RT1] {task.id} → {decision}")
+        return
 
+    log(f"Processing task {task.id} [{task.type}] ...")
+    
     # Auto-enrich git tasks: inject live git status + diff before routing to G1
     if task_type_str == "git":
         log(f"Task {task.id} [git] — injecting live git context from {REPO_DIR.name}")
@@ -672,6 +808,18 @@ def process_task(task: Task, task_path: Path, router: Router, queue: TaskQueue, 
         # Advance pipeline if this task belongs to one
         with _state_lock:
             completion = pipeline_ctrl.on_task_complete(task.id, result, queue)
+            # Merge SC1/SY1 scout output into rc_queue
+            pipeline_name_of_task = _get_pipeline_name_for_task(task.id, pipeline_ctrl)
+            if pipeline_name_of_task in (SC1_PIPELINE_NAME, SY1_PIPELINE_NAME):
+                from src.rc_queue_manager import load_queue, save_queue, merge_scout_results
+                channel = "scout" if pipeline_name_of_task == SC1_PIPELINE_NAME else "synthesis"
+                try:
+                    rc_queue = load_queue()
+                    added = merge_scout_results(result, channel, rc_queue)
+                    save_queue(rc_queue)
+                    log(f"[{channel.upper()}] Merged {added} topic(s) into rc_queue")
+                except Exception as e:
+                    log(f"[{channel.upper()}] merge_scout_results failed: {e}")
             if completion:
                 append_pipeline_notification(completion)
 
@@ -780,13 +928,20 @@ def run():
                     log(f"[RC Auto] Scheduler error: {e}")
                 # Re-sync: pipeline/RC may have dropped new JSON files after the first sync
                 sync_json_to_db(queue)
+                
+                try:
+                    auto_run_scouts(pipeline_ctrl, queue)
+                except Exception as e:
+                    log(f"[Scout Auto] Scheduler error: {e}")
+                # Re-sync: SC1/SY1 may have dropped new JSON files
+                sync_json_to_db(queue)
 
                 for task_file in sorted(TASKS_DIR.glob("*.json")):
                     with _state_lock:
                         task = _claim_task(task_file, queue)
                     if task is None:
                         continue
-                    future = executor.submit(process_task, task, task_file, router, queue, pipeline_ctrl)
+                    future = executor.submit(process_task, task, task_file, router, queue, pipeline_ctrl, staging)
                     futures[future] = task.id
                     log(f"[thread] Submitted {task.id} [{task.type}] (active: {len(futures)})")
 
