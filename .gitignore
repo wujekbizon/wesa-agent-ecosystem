@@ -13,6 +13,9 @@ logs/
 tasks/*.json
 !tasks/example_task.json
 
+# Wolfmed extractor data (local only, never push)
+extractor/
+
 # OS
 .DS_Store
 Thumbs.db

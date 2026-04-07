@@ -706,6 +706,144 @@ const ResearchCenterPanel = ({ addToast }) => {
     );
 };
 
+const WolfmedPanel = ({ addToast }) => {
+    const [stats, setStats] = React.useState(null);
+    const [books, setBooks] = React.useState([]);
+    const [selectedBook, setSelectedBook] = React.useState(null);
+    const [bookDetail, setBookDetail] = React.useState(null);
+    const [loading, setLoading] = React.useState(true);
+    const [detailLoading, setDetailLoading] = React.useState(false);
+
+    const fetchBooks = React.useCallback(async () => {
+        try {
+            const [statsData, booksData] = await Promise.all([
+                apiFetch('/wolfmed/stats'),
+                apiFetch('/wolfmed/books'),
+            ]);
+            setStats(statsData);
+            setBooks(booksData);
+        } catch (err) {
+            if (loading) addToast('Failed to load Wolfmed data: ' + err.message, 'error');
+        } finally {
+            setLoading(false);
+        }
+    }, [addToast, loading]);
+
+    React.useEffect(() => {
+        fetchBooks();
+        const interval = setInterval(fetchBooks, 5000);
+        return () => clearInterval(interval);
+    }, [fetchBooks]);
+
+    React.useEffect(() => {
+        if (!selectedBook) { setBookDetail(null); return; }
+        setDetailLoading(true);
+        apiFetch(`/wolfmed/books/${selectedBook}`)
+            .then(data => setBookDetail(data))
+            .catch(err => addToast('Failed to load book detail: ' + err.message, 'error'))
+            .finally(() => setDetailLoading(false));
+    }, [selectedBook, addToast]);
+
+    const chunkStatusColor = (status) => ({
+        pending:   'var(--muted)',
+        queued:    '#f5a623',
+        extracted: '#4a9eff',
+        validating:'#b47aff',
+        validated: 'var(--done)',
+        done:      'var(--done)',
+        failed:    'var(--failed)',
+    }[status] || 'var(--muted)');
+
+    const mergeStatusColor = (status) => ({
+        pending: 'var(--muted)',
+        done:    'var(--done)',
+        failed:  'var(--failed)',
+        queued:  '#f5a623',
+    }[status] || 'var(--muted)');
+
+    if (loading) return <div style={{ padding: '2rem', color: 'var(--muted)' }}>Loading Wolfmed data...</div>;
+
+    return (
+        <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+            <div style={{ width: '320px', flexShrink: 0, borderRight: '1px solid var(--border)', overflow: 'auto', padding: '1rem' }}>
+                {stats && (
+                    <div style={{ marginBottom: '1.5rem' }}>
+                        <div style={{ fontSize: '0.65em', letterSpacing: '0.12em', color: 'var(--muted)', textTransform: 'uppercase', fontFamily: 'var(--font-ui)', marginBottom: '0.75rem' }}>Pipeline Stats</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                            {[
+                                { label: 'Books',     value: stats.total_books },
+                                { label: 'Merged',    value: stats.merged_books },
+                                { label: 'Chunks',    value: stats.total_chunks },
+                                { label: 'Validated', value: stats.validated_chunks },
+                            ].map(({ label, value }) => (
+                                <div key={label} style={{ background: 'var(--surface2)', borderRadius: '4px', padding: '0.5rem 0.75rem' }}>
+                                    <div style={{ fontSize: '1.1em', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{value}</div>
+                                    <div style={{ fontSize: '0.65em', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+                <div style={{ fontSize: '0.65em', letterSpacing: '0.12em', color: 'var(--muted)', textTransform: 'uppercase', fontFamily: 'var(--font-ui)', marginBottom: '0.5rem' }}>Books</div>
+                {books.length === 0 && <div style={{ color: 'var(--muted)', fontSize: '0.8em' }}>No books in pipeline yet.</div>}
+                {books.map(book => {
+                    const pct = book.total_chunks > 0 ? Math.round((book.validated_count / book.total_chunks) * 100) : 0;
+                    const isSelected = selectedBook === book.book;
+                    return (
+                        <div key={book.book} onClick={() => setSelectedBook(isSelected ? null : book.book)}
+                            style={{ padding: '0.75rem', marginBottom: '0.5rem', background: isSelected ? 'var(--surface2)' : 'transparent', border: isSelected ? '1px solid var(--border)' : '1px solid transparent', borderRadius: '4px', cursor: 'pointer' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                                <span style={{ fontWeight: 600, fontSize: '0.85em', fontFamily: 'var(--font-ui)', color: 'var(--text)' }}>{book.category}</span>
+                                <span style={{ fontSize: '0.7em', color: mergeStatusColor(book.merge_status), fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{book.merge_status}</span>
+                            </div>
+                            <div style={{ height: '4px', background: 'var(--border)', borderRadius: '2px', overflow: 'hidden', marginBottom: '0.3rem' }}>
+                                <div style={{ height: '100%', width: `${pct}%`, background: book.merge_status === 'done' ? 'var(--done)' : 'var(--in-progress)', borderRadius: '2px', transition: 'width 0.5s' }} />
+                            </div>
+                            <div style={{ fontSize: '0.7em', color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
+                                {book.validated_count}/{book.total_chunks} validated ({pct}%)
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: '1rem' }}>
+                {!selectedBook && <div style={{ color: 'var(--muted)', fontSize: '0.85em', marginTop: '2rem', textAlign: 'center' }}>Select a book to view chunk details</div>}
+                {selectedBook && detailLoading && <div style={{ color: 'var(--muted)', fontSize: '0.85em' }}>Loading...</div>}
+                {selectedBook && bookDetail && !detailLoading && (
+                    <>
+                        <div style={{ marginBottom: '1rem' }}>
+                            <div style={{ fontSize: '1em', fontWeight: 700, fontFamily: 'var(--font-ui)', color: 'var(--text)', marginBottom: '0.25rem' }}>{bookDetail.category}</div>
+                            <div style={{ fontSize: '0.75em', color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>Mode: {bookDetail.mode} · Run: {bookDetail.run_id ? bookDetail.run_id.slice(0,8) : 'n/a'} · {bookDetail.created_at ? bookDetail.created_at.slice(0,16) : ''}</div>
+                        </div>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: '0.75em' }}>
+                            <thead>
+                                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                                    <th style={{ textAlign: 'left', padding: '0.4rem 0.5rem', color: 'var(--muted)', fontWeight: 600 }}>Chunk</th>
+                                    <th style={{ textAlign: 'left', padding: '0.4rem 0.5rem', color: 'var(--muted)', fontWeight: 600 }}>Pages</th>
+                                    <th style={{ textAlign: 'left', padding: '0.4rem 0.5rem', color: 'var(--muted)', fontWeight: 600 }}>Status</th>
+                                    <th style={{ textAlign: 'left', padding: '0.4rem 0.5rem', color: 'var(--muted)', fontWeight: 600 }}>Extract Task</th>
+                                    <th style={{ textAlign: 'left', padding: '0.4rem 0.5rem', color: 'var(--muted)', fontWeight: 600 }}>Validate Task</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {(bookDetail.chunks || []).map((chunk, i) => (
+                                    <tr key={chunk.id} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--surface2)' }}>
+                                        <td style={{ padding: '0.4rem 0.5rem', color: 'var(--text)' }}>{chunk.id}</td>
+                                        <td style={{ padding: '0.4rem 0.5rem', color: 'var(--muted)' }}>{chunk.pages}</td>
+                                        <td style={{ padding: '0.4rem 0.5rem' }}><span style={{ color: chunkStatusColor(chunk.status), fontWeight: 600 }}>{chunk.status}</span></td>
+                                        <td style={{ padding: '0.4rem 0.5rem', color: 'var(--muted)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chunk.extract_task_id || '—'}</td>
+                                        <td style={{ padding: '0.4rem 0.5rem', color: 'var(--muted)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chunk.validate_task_id || '—'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
 const App = () => {
     const [tasks, setTasks] = useState([]);
     const [selectedTaskId, setSelectedTaskId] = useState(null);
@@ -787,6 +925,7 @@ const App = () => {
                 <button className={activeTab==='pipelines' ?'active':''} onClick={() => setActiveTab('pipelines')}>Pipelines</button>
                 <button className={activeTab==='rc'        ?'active':''} onClick={() => setActiveTab('rc')}>Research Center</button>
                 <button className={activeTab==='axellog'   ?'active':''} onClick={() => setActiveTab('axellog')}>Axel Log</button>
+                <button className={activeTab==='wolfmed'   ?'active':''} onClick={() => setActiveTab('wolfmed')}>Wolfmed</button>
                 <button className={activeTab==='help'      ?'active':''} onClick={() => setActiveTab('help')}>Help</button>
             </div>
             {activeTab === 'tasks' && (
@@ -804,6 +943,7 @@ const App = () => {
             {activeTab === 'pipelines' && <div className="main-content"><PipelineLauncherPanel addToast={addToast} /></div>}
             {activeTab === 'rc'        && <div className="main-content"><ResearchCenterPanel addToast={addToast} /></div>}
             {activeTab === 'axellog'   && <div className="main-content" style={{ display:'flex', flexDirection:'column', padding:0 }}><AxelLogPanel /></div>}
+            {activeTab === 'wolfmed'   && <div className="main-content" style={{ padding: 0 }}><WolfmedPanel addToast={addToast} /></div>}
             {activeTab === 'help'      && <div className="main-content"><HelpPanel /></div>}
             <Toast toasts={toasts} onRemoveToast={removeToast} />
         </>

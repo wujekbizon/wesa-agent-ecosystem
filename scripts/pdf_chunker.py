@@ -1,14 +1,9 @@
+#!/usr/bin/env python3
 """
-pdf_chunker.py — Wolfmed PDF Splitter
-Part of the WESA Wolfmed content pipeline.
-
-Splits large PDFs into manageable chunks and extracts text for EX1 agent processing.
-Creates a manifest file tracking all chunks and their status.
+PDF Chunker - Splits PDFs into fixed 10-page chunks with text extraction.
 
 Usage:
-    python scripts/pdf_chunker.py <pdf_path> [--chunk-size 60] [--category fizjologia] [--mode generate]
-
-Called by wolfmed_intake.py — do not run standalone unless testing.
+    python scripts/pdf_chunker.py <pdf_path> --category <category> [--chunk-size N]
 """
 
 import argparse
@@ -19,288 +14,213 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+# Import pypdf with graceful fallback
 try:
     from pypdf import PdfReader, PdfWriter
 except ImportError:
-    print("[pdf_chunker] ERROR: pypdf not installed. Run: pip install pypdf --break-system-packages")
+    print("Error: pypdf is not installed. Install it with: pip install pypdf")
     sys.exit(1)
 
-# ─── Paths (resolve relative to this script's location) ───────────────────────
-SCRIPT_DIR = Path(__file__).resolve().parent
-ECOSYSTEM_DIR = SCRIPT_DIR.parent
-WESA_DIR = ECOSYSTEM_DIR.parent
-EXTRACTOR_DIR = WESA_DIR / "extractor"
 
-CHUNKS_DIR = EXTRACTOR_DIR / "chunks"
-DATA_DIR = EXTRACTOR_DIR / "data"
-
-DEFAULT_CHUNK_SIZE = 60   # pages per chunk
-MIN_CHAPTER_PAGES = 5     # ignore chapter boundaries that produce < 5 pages
-MAX_CHAPTER_PAGES = 80    # if a chapter is > 80 pages, subdivide it
-
-# ─── Auto-detect extraction mode ───────────────────────────────────────────────
-# Heuristics based on keyword density in first N pages of text
-QA_KEYWORDS = ["?", "a)", "b)", "c)", "d)", "prawidłowa", "odpowiedź", "klucz"]
-PROCEDURE_KEYWORDS = ["CZYNNOŚCI PRZYGOTOWAWCZE", "CZYNNOŚCI WŁAŚCIWE", "SUMA PUNKTÓW",
-                      "Poziom zaliczenia", "PYTANIA SPRAWDZAJĄCE"]
-
-def detect_mode(text_sample: str) -> str:
-    """Heuristically detect extraction mode from PDF text sample."""
-    sample_upper = text_sample.upper()
-    # Procedure checklists take priority
-    if any(kw.upper() in sample_upper for kw in PROCEDURE_KEYWORDS):
-        return "extract_procedures"
-    # High density of question marks + answer options = extract mode
-    question_count = text_sample.count("?")
-    if question_count > 20:
-        return "extract"
-    return "generate"
+def sanitize_bookname(name: str) -> str:
+    """Convert book name to safe filename: lowercase, underscores, [a-z0-9_-] only."""
+    name = name.lower().replace(" ", "_")
+    name = re.sub(r'[^a-z0-9_-]', '', name)
+    return name
 
 
-def extract_text_from_pages(reader: PdfReader, start: int, end: int) -> str:
-    """Extract text from a page range (0-indexed, end exclusive)."""
+def get_page_range_str(start_page: int, end_page: int) -> str:
+    """Return human-readable page range string (1-indexed)."""
+    return f"{start_page}-{end_page}"
+
+
+def extract_text_from_pages(reader: PdfReader, start_idx: int, end_idx: int) -> str:
+    """
+    Extract text from a range of pages (0-indexed, inclusive start, exclusive end).
+    Returns concatenated text with placeholder for failed pages.
+    """
     texts = []
-    for page_num in range(start, min(end, len(reader.pages))):
+    for i in range(start_idx, end_idx):
         try:
-            page_text = reader.pages[page_num].extract_text() or ""
-            texts.append(page_text)
-        except Exception as e:
-            texts.append(f"[Page {page_num + 1} extraction failed: {e}]")
-    return "\n\n".join(texts)
+            page = reader.pages[i]
+            text = page.extract_text() or ""
+            texts.append(text)
+        except Exception:
+            page_num = i + 1  # Convert to 1-indexed for display
+            texts.append(f"[Page {page_num} extraction failed]")
+    return "\n".join(texts)
 
 
-def get_chapter_boundaries(reader: PdfReader) -> list[int] | None:
+def chunk_pdf(pdf_path: Path, category: str, chunk_size: int = 10) -> dict:
     """
-    Try to extract chapter start pages from PDF bookmarks/outlines.
-    Returns sorted list of 0-indexed page numbers where chapters start,
-    or None if no useful outline found.
-    """
-    try:
-        outline = reader.outline
-        if not outline:
-            return None
-
-        page_numbers = []
-
-        def collect_pages(items):
-            for item in items:
-                if isinstance(item, list):
-                    collect_pages(item)
-                elif hasattr(item, "page"):
-                    try:
-                        page_idx = reader.get_page_number(item.page)
-                        page_numbers.append(page_idx)
-                    except Exception:
-                        pass
-
-        collect_pages(outline)
-
-        if len(page_numbers) < 2:
-            return None
-
-        boundaries = sorted(set(page_numbers))
-        return boundaries
-
-    except Exception:
-        return None
-
-
-def split_by_chapters(reader: PdfReader, total_pages: int,
-                       chapter_starts: list[int]) -> list[tuple[int, int]]:
-    """
-    Convert chapter start page numbers into (start, end) page ranges.
-    Merges very short chapters, subdivides very long ones.
-    Returns list of (start_page, end_page) tuples (0-indexed, end exclusive).
-    """
-    # Build raw chapter ranges
-    ranges = []
-    for i, start in enumerate(chapter_starts):
-        end = chapter_starts[i + 1] if i + 1 < len(chapter_starts) else total_pages
-        ranges.append((start, end))
-
-    # Merge short chapters into the next one
-    merged = []
-    buffer_start = None
-    buffer_end = None
-
-    for start, end in ranges:
-        length = end - start
-        if buffer_start is None:
-            buffer_start, buffer_end = start, end
-        else:
-            if (buffer_end - buffer_start) < MIN_CHAPTER_PAGES:
-                buffer_end = end  # merge into buffer
-            else:
-                merged.append((buffer_start, buffer_end))
-                buffer_start, buffer_end = start, end
-
-    if buffer_start is not None:
-        merged.append((buffer_start, buffer_end))
-
-    # Subdivide oversized chunks
-    final = []
-    for start, end in merged:
-        length = end - start
-        if length <= MAX_CHAPTER_PAGES:
-            final.append((start, end))
-        else:
-            # Split into fixed-size sub-chunks
-            pos = start
-            while pos < end:
-                chunk_end = min(pos + DEFAULT_CHUNK_SIZE, end)
-                final.append((pos, chunk_end))
-                pos = chunk_end
-
-    return final
-
-
-def split_by_fixed_size(total_pages: int, chunk_size: int) -> list[tuple[int, int]]:
-    """Fall back to fixed-size page ranges."""
-    ranges = []
-    for start in range(0, total_pages, chunk_size):
-        end = min(start + chunk_size, total_pages)
-        ranges.append((start, end))
-    return ranges
-
-
-def chunk_pdf(
-    pdf_path: Path,
-    category: str = "",
-    mode: str = "auto",
-    chunk_size: int = DEFAULT_CHUNK_SIZE,
-) -> dict:
-    """
-    Main entry point. Splits a PDF and returns a manifest dict.
-
+    Split a PDF into fixed-size chunks, extract text, and create manifest.
+    
     Args:
-        pdf_path: Path to the source PDF
-        category: Wolfmed subject category (e.g. 'fizjologia'). Auto-detected if empty.
-        mode: 'generate', 'extract', 'extract_procedures', or 'auto'
-        chunk_size: Number of pages per chunk (used when chapter-aware splitting unavailable)
-
+        pdf_path: Path to source PDF file
+        category: Wolfmed subject category (required, no auto-detection)
+        chunk_size: Pages per chunk (default: 10)
+    
     Returns:
-        manifest dict (also written to extractor/data/<book>_manifest.json)
+        Manifest dictionary
     """
-    pdf_path = Path(pdf_path).resolve()
+    # Resolve directory structure relative to this script
+    script_dir = Path(__file__).resolve().parent
+    ecosystem_dir = script_dir.parent
+    wesa_dir = ecosystem_dir.parent
+    extractor_dir = wesa_dir / "extractor"
+    chunks_dir = extractor_dir / "chunks"
+    data_dir = extractor_dir / "data"
+    
+    # Validate input file
     if not pdf_path.exists():
-        raise FileNotFoundError(f"PDF not found: {pdf_path}")
-
-    book_name = pdf_path.stem
-    # Sanitize book name for use in file names
-    book_name_safe = re.sub(r"[^\w\-]", "_", book_name).lower()
-
-    print(f"[pdf_chunker] Processing: {pdf_path.name}")
-
+        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+    
+    # Generate book name
+    bookname = sanitize_bookname(pdf_path.stem)
+    
+    # Create category subdirectory
+    category_chunks_dir = chunks_dir / category
+    category_chunks_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Read PDF
     reader = PdfReader(str(pdf_path))
     total_pages = len(reader.pages)
-    print(f"[pdf_chunker] Total pages: {total_pages}")
-
-    # ── Auto-detect category from filename if not provided ──
-    if not category:
-        # Guess from the filename
-        fname_lower = book_name.lower()
-        known = ["fizjologia", "anatomia", "biochemia", "mikrobiologia",
-                 "socjologia", "pielegniarstwo", "prawo", "farmakologia",
-                 "opiekun", "patologia"]
-        category = next((k for k in known if k in fname_lower), book_name_safe)
-
-    # ── Determine splitting strategy ──
-    chapter_starts = get_chapter_boundaries(reader)
-    if chapter_starts and len(chapter_starts) > 1:
-        print(f"[pdf_chunker] Chapter-aware splitting: {len(chapter_starts)} chapters found")
-        page_ranges = split_by_chapters(reader, total_pages, chapter_starts)
-    else:
-        print(f"[pdf_chunker] Fixed-size splitting: {chunk_size} pages per chunk")
-        page_ranges = split_by_fixed_size(total_pages, chunk_size)
-
-    print(f"[pdf_chunker] Will create {len(page_ranges)} chunks")
-
-    # ── Create output directories ──
-    book_chunks_dir = CHUNKS_DIR / book_name_safe
-    book_chunks_dir.mkdir(parents=True, exist_ok=True)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    # ── Sample text for mode detection ──
-    sample_text = extract_text_from_pages(reader, 0, min(5, total_pages))
-    if mode == "auto":
-        mode = detect_mode(sample_text)
-        print(f"[pdf_chunker] Auto-detected mode: {mode}")
-
-    # ── Split PDF and extract text ──
-    chunks = []
-    for i, (start_page, end_page) in enumerate(page_ranges):
-        chunk_num = str(i + 1).zfill(3)
-        chunk_stem = f"{book_name_safe}_chunk_{chunk_num}"
-
-        chunk_pdf_path = book_chunks_dir / f"{chunk_stem}.pdf"
-        chunk_txt_path = book_chunks_dir / f"{chunk_stem}.txt"
-
-        # Write chunk PDF
+    
+    print(f"Processing: {pdf_path.name}")
+    print(f"Total pages: {total_pages}")
+    print(f"Chunk size: {chunk_size}")
+    print(f"Category: {category}")
+    print("-" * 50)
+    
+    # Calculate chunks
+    num_chunks = (total_pages + chunk_size - 1) // chunk_size
+    
+    # Build manifest structure
+    run_id = str(uuid.uuid4())
+    created_at = datetime.now().isoformat()
+    
+    manifest = {
+        "run_id": run_id,
+        "book": bookname,
+        "category": category,
+        "mode": "generate",
+        "source_pdf": str(pdf_path.relative_to(wesa_dir)),
+        "total_chunks": num_chunks,
+        "validated_count": 0,
+        "merge_status": "pending",
+        "created_at": created_at,
+        "updated_at": created_at,
+        "chunks": []
+    }
+    
+    # Process each chunk
+    for chunk_idx in range(num_chunks):
+        start_page_0idx = chunk_idx * chunk_size
+        end_page_0idx = min((chunk_idx + 1) * chunk_size, total_pages)
+        
+        # Convert to 1-indexed for display and naming
+        start_page_1idx = start_page_0idx + 1
+        end_page_1idx = end_page_0idx
+        
+        page_range_str = get_page_range_str(start_page_1idx, end_page_1idx)
+        chunk_id = f"{bookname}_page_{page_range_str}"
+        
+        # Output paths
+        chunk_pdf_path = category_chunks_dir / f"{chunk_id}.pdf"
+        chunk_txt_path = category_chunks_dir / f"{chunk_id}.txt"
+        
+        # Create chunk PDF
         writer = PdfWriter()
-        for page_idx in range(start_page, end_page):
+        for page_idx in range(start_page_0idx, end_page_0idx):
             writer.add_page(reader.pages[page_idx])
-
+        
         with open(chunk_pdf_path, "wb") as f:
             writer.write(f)
-
-        # Extract text from chunk
-        chunk_text = extract_text_from_pages(reader, start_page, end_page)
-        chunk_txt_path.write_text(chunk_text, encoding="utf-8")
-
+        
+        # Extract text
+        text_content = extract_text_from_pages(reader, start_page_0idx, end_page_0idx)
+        char_count = len(text_content)
+        
+        with open(chunk_txt_path, "w", encoding="utf-8") as f:
+            f.write(text_content)
+        
+        # Build chunk entry for manifest
         chunk_entry = {
-            "id": chunk_stem,
-            "chunk_num": i + 1,
-            "pdf": str(chunk_pdf_path),
-            "txt": str(chunk_txt_path),
-            "pages": f"{start_page + 1}-{end_page}",
-            "page_count": end_page - start_page,
-            "status": "pending",           # pending → queued → extracted → validated → done
-            "task_id": None,
-            "output_json": None,
-            "validated_json": None,
+            "id": chunk_id,
+            "pdf": f"extractor/chunks/{category}/{chunk_id}.pdf",
+            "txt": f"extractor/chunks/{category}/{chunk_id}.txt",
+            "pages": page_range_str,
+            "status": "pending",
+            "extract_task_id": None,
+            "validate_task_id": None,
+            "raw_json": f"extractor/outputs/{chunk_id}_raw.json",
+            "validated_json": f"extractor/outputs/{chunk_id}_validated.json"
         }
-        chunks.append(chunk_entry)
-        print(f"[pdf_chunker]   Chunk {chunk_num}: pages {start_page + 1}-{end_page} "
-              f"({end_page - start_page} pages, {len(chunk_text)} chars)")
-
-    # ── Write manifest ──
-    manifest = {
-        "book": book_name_safe,
-        "source_pdf": str(pdf_path),
-        "category": category,
-        "mode": mode,
-        "total_pages": total_pages,
-        "total_chunks": len(chunks),
-        "chunks": chunks,
-        "merge_status": "pending",    # pending → queued → done → failed
-        "merged_output": None,
-        "created_at": datetime.now().isoformat(),
-        "updated_at": datetime.now().isoformat(),
-    }
-
-    manifest_path = DATA_DIR / f"{book_name_safe}_manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"[pdf_chunker] Manifest written: {manifest_path}")
-
+        manifest["chunks"].append(chunk_entry)
+        
+        # Print progress
+        print(f"Chunk {chunk_idx + 1}/{num_chunks}: pages {page_range_str}, {char_count} chars")
+    
+    # Write manifest
+    manifest_path = data_dir / f"{bookname}_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+    
+    print("-" * 50)
+    print(f"Manifest written to: {manifest_path}")
+    print(f"Chunks written to: {category_chunks_dir}")
+    
     return manifest
 
 
-# ─── CLI ───────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Split a PDF into chunks for Wolfmed extraction pipeline")
-    parser.add_argument("pdf", help="Path to input PDF")
-    parser.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE, help="Pages per chunk (default: 60)")
-    parser.add_argument("--category", default="", help="Wolfmed category (auto-detected if empty)")
-    parser.add_argument("--mode", default="auto",
-                        choices=["auto", "generate", "extract", "extract_procedures"],
-                        help="Extraction mode (default: auto)")
-
-    args = parser.parse_args()
-    manifest = chunk_pdf(
-        pdf_path=Path(args.pdf),
-        category=args.category,
-        mode=args.mode,
-        chunk_size=args.chunk_size,
+def main():
+    parser = argparse.ArgumentParser(
+        description="Split a PDF into fixed 10-page chunks with text extraction.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python pdf_chunker.py book.pdf --category fizjologia
+  python pdf_chunker.py book.pdf --category anatomia --chunk-size 15
+        """
     )
-    print(f"\n[pdf_chunker] Done. {manifest['total_chunks']} chunks created.")
-    print(f"[pdf_chunker] Manifest: {DATA_DIR / (manifest['book'] + '_manifest.json')}")
+    
+    parser.add_argument(
+        "pdf_path",
+        type=str,
+        help="Path to the source PDF file"
+    )
+    
+    parser.add_argument(
+        "--category",
+        type=str,
+        required=True,
+        help="Wolfmed subject category string (e.g. 'fizjologia'). Required, no auto-detection."
+    )
+    
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=10,
+        help="Pages per chunk (default: 10)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Convert pdf_path to Path object
+    pdf_path = Path(args.pdf_path)
+    
+    try:
+        manifest = chunk_pdf(pdf_path, args.category, args.chunk_size)
+        print(f"\nProcessing complete. Created {manifest['total_chunks']} chunks.")
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error processing PDF: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

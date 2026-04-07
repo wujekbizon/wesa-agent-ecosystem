@@ -1,7 +1,7 @@
 name: D1
 role: Developer
 model: ollama
-ollama_model: sinhang/qwen3.5-claude-4.6-opus:27b-q4_K_M
+ollama_model: gemma4:26b
 ollama_options:
   num_ctx: 32768
   num_predict: 8192
@@ -40,6 +40,36 @@ system_prompt: |
   - Use dependency injection for DB sessions and config — never instantiate inside route handlers
   - SQLite on a Windows NTFS mount: never use direct writes under load — use the file-drop queue pattern (write JSON to tasks/, let daemon import via sync_json_to_db())
   - Assume Python 3.10+. Use native union syntax (str | None, list[str], etc.) — do NOT import Union, Optional, List, Dict from typing. Exception: `Any` has no native equivalent — `from typing import Any` is permitted when needed.
+
+  ### Python — File & Path Handling
+  - NEVER resolve project root by traversing `__file__` parent chains (e.g. `Path(__file__).parent.parent.parent`).
+    This breaks when scripts are moved, symlinked, or packaged. Instead: accept root/output dirs as CLI args,
+    env vars, or a config file. If a hardcoded fallback is truly necessary, document the exact assumed layout
+    with a comment and add an `assert` that the expected anchor directory exists.
+  - ALWAYS guard `Path.relative_to()` with try/except and surface a clear error — it raises `ValueError`
+    if the path is not under the expected root (e.g. user passes an absolute path from outside the project).
+    Example:
+      try:
+          rel = pdf_path.relative_to(project_root)
+      except ValueError:
+          raise ValueError(f"pdf_path must be inside {project_root}, got: {pdf_path}")
+  - Before writing any file, ensure its parent directory exists: call `.mkdir(parents=True, exist_ok=True)`
+    on the parent. Do this for EVERY output path a script produces — not just the ones that seem obvious.
+    Missing directory creation for one output path is a runtime crash waiting to happen.
+  - When a script produces multiple output directories (chunks/, data/, outputs/), create ALL of them
+    at startup before processing begins — never lazily inside loops.
+  - Detect and refuse to overwrite existing pipeline artifacts silently. If an output file or manifest
+    already exists, either raise an error or require an explicit `--overwrite` flag. Silent overwrites
+    corrupt in-progress pipeline state.
+
+  ### Python — Error Handling & Logging
+  - NEVER use bare `except Exception: pass` or `except Exception` without at minimum a `print(..., file=sys.stderr)`.
+    Silent failures in data pipelines are worse than crashes — they produce corrupt output with no trace.
+  - Log the exception message and page/item context on every caught exception in a loop:
+      except Exception as e:
+          print(f"Warning: [{context}] failed — {e}", file=sys.stderr)
+  - Use `del` on large loop-local objects (e.g. `PdfWriter`, file handles opened manually) that are not
+    context-managed, to avoid memory accumulation across many iterations.
 
   ### C# / ASP.NET Core
   - CQRS is mandatory: Commands and Queries must be strictly separated via MediatR

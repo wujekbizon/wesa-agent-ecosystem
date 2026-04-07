@@ -33,6 +33,12 @@ LOGS_DEV_DIR = LOGS_DIR / "dev"
 TASKS_DIR = BASE_DIR / "tasks"
 STATIC_DIR = BASE_DIR / "static"
 DESIGNS_DIR = STATIC_DIR / "designs"
+WESA_DIR = BASE_DIR.parent
+EXTRACTOR_DIR = WESA_DIR / "extractor"
+WOLFMED_DATA_DIR = EXTRACTOR_DIR / "data"
+WOLFMED_OUTPUTS_DIR = EXTRACTOR_DIR / "outputs"
+WOLFMED_DONE_DIR = EXTRACTOR_DIR / "done"
+WOLFMED_INTAKE_DIR = EXTRACTOR_DIR / "intake"
 DASHBOARD_FILE = STATIC_DIR / "dashboard.html"
 PID_FILE = LOGS_DIR / "daemon.pid"
 DAEMON_SCRIPT = BASE_DIR / "daemon.py"
@@ -560,7 +566,7 @@ class TaskSubmitRequest(BaseModel):
     prompt: str
     output_file: str = ""
 
-VALID_TASK_TYPES = {"research", "write", "code", "design", "frontend", "review", "test", "assets", "general", "git"}
+VALID_TASK_TYPES = {"research", "write", "code", "design", "frontend", "review", "test", "assets", "general", "git", "extract_pdf", "validate_questions"}
 
 @app.post("/api/tasks")
 async def submit_task(req: TaskSubmitRequest):
@@ -616,6 +622,40 @@ async def start_pipeline(req: PipelineStartRequest):
     (TASKS_DIR / f"{task_id}.json").write_text(json.dumps(task, indent=2), encoding="utf-8")
     queue.import_task(task)
     return {"ok": True, "task_id": task_id, "pipeline": req.pipeline, "topic": req.topic}
+
+# --- Wolfmed ---
+
+def _load_wolfmed_manifests():
+    if not WOLFMED_DATA_DIR.exists(): return []
+    result = []
+    for f in sorted(WOLFMED_DATA_DIR.glob("*_manifest.json")):
+        try: result.append(json.loads(f.read_text(encoding="utf-8")))
+        except: continue
+    return result
+
+@app.get("/api/wolfmed/books")
+async def list_wolfmed_books():
+    manifests = _load_wolfmed_manifests()
+    out = []
+    for m in manifests:
+        counts = {"pending":0,"queued":0,"extracted":0,"validating":0,"validated":0}
+        for c in m.get("chunks",[]):
+            s = c.get("status","pending")
+            counts[s] = counts.get(s,0) + 1
+        out.append({"book":m.get("book"),"category":m.get("category"),"mode":m.get("mode","generate"),"total_chunks":m.get("total_chunks",0),"validated_count":m.get("validated_count",0),"merge_status":m.get("merge_status","pending"),"created_at":m.get("created_at"),"updated_at":m.get("updated_at"),"chunk_statuses":counts})
+    return out
+
+@app.get("/api/wolfmed/books/{book}")
+async def get_wolfmed_book(book: str):
+    p = WOLFMED_DATA_DIR / f"{book}_manifest.json"
+    if not p.exists(): raise HTTPException(status_code=404, detail=f"Manifest not found: {book}")
+    try: return json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/wolfmed/stats")
+async def get_wolfmed_stats():
+    manifests = _load_wolfmed_manifests()
+    return {"total_books":len(manifests),"total_chunks":sum(m.get("total_chunks",0) for m in manifests),"validated_chunks":sum(m.get("validated_count",0) for m in manifests),"merged_books":sum(1 for m in manifests if m.get("merge_status")=="done"),"in_progress_books":sum(1 for m in manifests if m.get("merge_status") not in ("done","failed"))}
 
 # --- Daemon Control ---
 
