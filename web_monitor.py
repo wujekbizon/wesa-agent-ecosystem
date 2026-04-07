@@ -585,6 +585,7 @@ async def submit_task(req: TaskSubmitRequest):
         "model_used": "",
     }
     (TASKS_DIR / f"{task_id}.json").write_text(json.dumps(task, indent=2), encoding="utf-8")
+    queue.import_task(task)
     return {"ok": True, "task_id": task_id}
 
 # --- Pipeline Trigger ---
@@ -613,6 +614,7 @@ async def start_pipeline(req: PipelineStartRequest):
         "output_file": "",
     }
     (TASKS_DIR / f"{task_id}.json").write_text(json.dumps(task, indent=2), encoding="utf-8")
+    queue.import_task(task)
     return {"ok": True, "task_id": task_id, "pipeline": req.pipeline, "topic": req.topic}
 
 # --- Daemon Control ---

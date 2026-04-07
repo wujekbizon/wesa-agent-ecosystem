@@ -50,7 +50,7 @@ stages:
       {stage.review}
 
       ACCUMULATED DESIGN TIPS FROM THIS RUN:
-      {read_file:WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md}
+      {read_file:agents/skills/overlays/{run_id}_ux_overlay.md}
 
       INSTRUCTIONS:
 
@@ -78,7 +78,7 @@ stages:
       across prior iterations of this run.
 
       Output: complete single-file HTML only. No explanation text before or after.
-    output_file: "WesaTeam/agent-ecosystem/static/designs/{run_id}_v{iteration}_prototype.html"
+    output_file: "static/designs/{run_id}_v{iteration}_prototype.html"
 
   - id: review
     agent: q1
@@ -109,7 +109,7 @@ stages:
 
       Prototype HTML:
       {prev_output}
-    output_file: "WesaTeam/agent-ecosystem/logs/designs/{run_id}_v{iteration}_review.md"
+    output_file: "logs/designs/{run_id}_v{iteration}_review.md"
 
   - id: skill_update
     agent: su1
@@ -127,13 +127,13 @@ stages:
       by a stronger existing tip.
 
       Previous overlay:
-      {read_file:WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md}
+      {read_file:agents/skills/overlays/{run_id}_ux_overlay.md}
 
       Q1 Review:
       {stage.review}
 
       Output: ONLY the updated overlay as a markdown list. No YAML. No explanations. Just the tips.
-    output_file: "WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md"
+    output_file: "agents/skills/overlays/{run_id}_ux_overlay.md"
     loop_to: design
     stop_if: "score >= 72"
 
@@ -157,14 +157,14 @@ stages:
       - Output the COMPLETE updated ux_agent.yaml — valid YAML starting with: name: UX1
 
       Current ux_agent.yaml:
-      {read_file:WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml}
+      {read_file:agents/skills/ux_agent.yaml}
 
       Accumulated run tips:
-      {read_file:WesaTeam/agent-ecosystem/agents/skills/overlays/{run_id}_ux_overlay.md}
+      {read_file:agents/skills/overlays/{run_id}_ux_overlay.md}
 
       Winning Q1 review:
       {stage.review}
-    output_file: "WesaTeam/agent-ecosystem/agents/skills/ux_agent.yaml"
+    output_file: "agents/skills/ux_agent.yaml"
 
 max_iterations: 12
 notify_on_complete: true

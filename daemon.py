@@ -94,6 +94,9 @@ TASK_TYPE_LOG_DIR = {
     "git":          LOGS_DEV_DIR,
     "general":      LOGS_DEV_DIR,
     "axel":         LOGS_DEV_DIR,
+    # Wolfmed extraction pipeline
+    "extract_pdf":         LOGS_DEV_DIR,
+    "validate_questions":  LOGS_DEV_DIR,
 }
 
 # Git repo root: the agent-ecosystem folder (where daemon.py lives)
@@ -599,6 +602,11 @@ def _claim_task(task_path: Path, queue: TaskQueue) -> "Task | None":
     data = json.loads(task_path.read_text(encoding="utf-8"))
     data.update(json.loads(task.to_json()))
     task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    
+    # Ensure task exists in SQLite before updating status — covers tasks
+    # created on disk after the last sync_json_to_db() pass
+    queue.import_task(data)  # ← ADD THIS LINE
+    
     queue.update_status(task.id, "in_progress")
     return task
 
