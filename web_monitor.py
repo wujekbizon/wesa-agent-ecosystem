@@ -642,7 +642,25 @@ async def list_wolfmed_books():
         for c in m.get("chunks",[]):
             s = c.get("status","pending")
             counts[s] = counts.get(s,0) + 1
-        out.append({"book":m.get("book"),"category":m.get("category"),"mode":m.get("mode","generate"),"total_chunks":m.get("total_chunks",0),"validated_count":m.get("validated_count",0),"merge_status":m.get("merge_status","pending"),"created_at":m.get("created_at"),"updated_at":m.get("updated_at"),"chunk_statuses":counts})
+        out.append({
+            "book": m.get("book"),
+            "category": m.get("category"),
+            "mode": m.get("mode","generate"),
+            "total_chunks": m.get("total_chunks",0),
+            "validated_count": m.get("validated_count",0),
+            "merge_status": m.get("merge_status","pending"),
+            "created_at": m.get("created_at"),
+            "updated_at": m.get("updated_at"),
+            "chunk_statuses": counts,
+            # Trim fields (present only if chunker trimming was used)
+            "total_pages": m.get("total_pages"),
+            "content_pages": m.get("content_pages"),
+            "content_start_page": m.get("content_start_page"),
+            "content_end_page": m.get("content_end_page"),
+            "skipped_front": m.get("skipped_front", 0),
+            "skipped_back": m.get("skipped_back", 0),
+            "auto_trim": m.get("auto_trim") is not None,
+        })
     return out
 
 @app.get("/api/wolfmed/books/{book}")

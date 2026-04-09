@@ -789,18 +789,23 @@ const WolfmedPanel = ({ addToast }) => {
                 {books.map(book => {
                     const pct = book.total_chunks > 0 ? Math.round((book.validated_count / book.total_chunks) * 100) : 0;
                     const isSelected = selectedBook === book.book;
+                    const trimmed = (book.skipped_front || 0) + (book.skipped_back || 0);
                     return (
                         <div key={book.book} onClick={() => setSelectedBook(isSelected ? null : book.book)}
                             style={{ padding: '0.75rem', marginBottom: '0.5rem', background: isSelected ? 'var(--surface2)' : 'transparent', border: isSelected ? '1px solid var(--border)' : '1px solid transparent', borderRadius: '4px', cursor: 'pointer' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
                                 <span style={{ fontWeight: 600, fontSize: '0.85em', fontFamily: 'var(--font-ui)', color: 'var(--text)' }}>{book.category}</span>
-                                <span style={{ fontSize: '0.7em', color: mergeStatusColor(book.merge_status), fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{book.merge_status}</span>
+                                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                                    {book.auto_trim && <span style={{ fontSize: '0.6em', color: '#4a9eff', fontFamily: 'var(--font-mono)', background: 'rgba(74,158,255,0.12)', padding: '1px 5px', borderRadius: '3px', letterSpacing: '0.06em' }}>AUTO</span>}
+                                    <span style={{ fontSize: '0.7em', color: mergeStatusColor(book.merge_status), fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{book.merge_status}</span>
+                                </div>
                             </div>
                             <div style={{ height: '4px', background: 'var(--border)', borderRadius: '2px', overflow: 'hidden', marginBottom: '0.3rem' }}>
                                 <div style={{ height: '100%', width: `${pct}%`, background: book.merge_status === 'done' ? 'var(--done)' : 'var(--in-progress)', borderRadius: '2px', transition: 'width 0.5s' }} />
                             </div>
                             <div style={{ fontSize: '0.7em', color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
                                 {book.validated_count}/{book.total_chunks} validated ({pct}%)
+                                {trimmed > 0 && <span style={{ marginLeft: '0.5rem', color: '#f5a623' }}>· {trimmed}pp skipped</span>}
                             </div>
                         </div>
                     );
@@ -813,7 +818,37 @@ const WolfmedPanel = ({ addToast }) => {
                     <>
                         <div style={{ marginBottom: '1rem' }}>
                             <div style={{ fontSize: '1em', fontWeight: 700, fontFamily: 'var(--font-ui)', color: 'var(--text)', marginBottom: '0.25rem' }}>{bookDetail.category}</div>
-                            <div style={{ fontSize: '0.75em', color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>Mode: {bookDetail.mode} · Run: {bookDetail.run_id ? bookDetail.run_id.slice(0,8) : 'n/a'} · {bookDetail.created_at ? bookDetail.created_at.slice(0,16) : ''}</div>
+                            <div style={{ fontSize: '0.75em', color: 'var(--muted)', fontFamily: 'var(--font-mono)', marginBottom: '0.4rem' }}>
+                                Mode: {bookDetail.mode} · Run: {bookDetail.run_id ? bookDetail.run_id.slice(0,8) : 'n/a'} · {bookDetail.created_at ? bookDetail.created_at.slice(0,16) : ''}
+                            </div>
+                            {bookDetail.total_pages != null && (
+                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.7em', fontFamily: 'var(--font-mono)' }}>
+                                    <span style={{ background: 'var(--surface2)', padding: '2px 7px', borderRadius: '3px', color: 'var(--text)' }}>
+                                        {bookDetail.content_pages ?? bookDetail.total_pages}
+                                        <span style={{ color: 'var(--muted)' }}>/{bookDetail.total_pages} pages</span>
+                                    </span>
+                                    {bookDetail.skipped_front > 0 && (
+                                        <span style={{ background: 'rgba(245,166,35,0.12)', padding: '2px 7px', borderRadius: '3px', color: '#f5a623' }}>
+                                            ↓ {bookDetail.skipped_front}pp front
+                                        </span>
+                                    )}
+                                    {bookDetail.skipped_back > 0 && (
+                                        <span style={{ background: 'rgba(245,166,35,0.12)', padding: '2px 7px', borderRadius: '3px', color: '#f5a623' }}>
+                                            ↑ {bookDetail.skipped_back}pp back
+                                        </span>
+                                    )}
+                                    {bookDetail.auto_trim && (
+                                        <span style={{ background: 'rgba(74,158,255,0.12)', padding: '2px 7px', borderRadius: '3px', color: '#4a9eff' }}>
+                                            auto-trim
+                                        </span>
+                                    )}
+                                    {bookDetail.content_start_page != null && (
+                                        <span style={{ color: 'var(--muted)', padding: '2px 4px' }}>
+                                            content pp {bookDetail.content_start_page}–{bookDetail.content_end_page}
+                                        </span>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: '0.75em' }}>
                             <thead>
@@ -1057,6 +1092,24 @@ const DOCS = [
             { title: 'research-center', body: 'R1 researches a topic → W1 synthesizes a WESA task brief → brief staged for Axel review. Runs once per topic. 5 topics in rotation. Trigger: manual (or auto via RC Scheduler).' },
             { title: 'design-loop', body: 'R1 researches 3 ranked design directions → UX1 prototypes the most original → Q1 scores (target 72/80) → SU1 updates skill overlay → loops back to UX1. Max 8 iterations. On approval: SU1 permanently merges tips into ux_agent.yaml. Trigger: manual.' },
             { title: 'Pipeline Architecture', body: 'Stages defined in agents/pipelines/*.yaml. loop_to field creates the iteration loop. stop_if: "score >= 72" parses Q1 output for X/80 pattern. {stage.<id>} injects previous stage output. {read_file:<path>} injects file contents at queue time.' },
+        ],
+    },
+    {
+        section: 'Wolfmed Pipeline',
+        items: [
+            { title: 'Overview', body: 'Takes a Polish medical PDF → produces a validated JSON question bank. Four phases: Chunk → Generate (EX1) → Validate (EX1) → Merge. Spans two directories: extractor/ (source, chunks, output) and agent-ecosystem/ (daemon tasks, agent outputs).' },
+            { title: 'Phase 1 — Chunk', body: 'Script: pdf_chunker.py. Drop PDF into extractor/intake/<category>/. Run wolfmed_intake.py --category <name>. Splits PDF into 10-page chunks, extracts text to .txt, writes chunks to extractor/chunks/<category>/, creates manifest at extractor/data/<book>_manifest.json, drops wm-ex-* task files into agent-ecosystem/tasks/.' },
+            { title: 'Chunker — Static Trim (Option 1)', body: 'Skip known boilerplate pages unconditionally. --skip-start N skips first N pages (title, copyright, ToC, preface). --skip-end N skips last N pages (bibliography, index, blank). Example: python wolfmed_intake.py --category fizjologia --skip-start 12 --skip-end 5' },
+            { title: 'Chunker — Auto-Trim (Option 2)', body: 'Heuristic boundary detection. --auto-trim scans up to 20 pages at each boundary (--auto-trim-window N to change). Skips pages that are: nearly blank (<150 chars), table of contents (dot-leader lines), dense short lines >72% (index/ToC), or contain Polish structural keywords (spis treści, bibliografia, piśmiennictwo, indeks, ©, isbn). Prints per-page decision to console. Example: python wolfmed_intake.py --category fizjologia --auto-trim' },
+            { title: 'Chunker — Combined (recommended)', body: 'Static skip runs first, auto-trim refines within the remaining range. Example: python wolfmed_intake.py --category fizjologia --skip-start 5 --auto-trim. Use for unknown books where you want to hard-cut obvious front matter and let heuristics find the exact content boundary.' },
+            { title: 'Phase 2 — Generate (EX1)', body: 'Daemon picks up wm-ex-* tasks automatically (3s poll). EX1 (gemini-3.1-pro-preview, MODE: GENERATE) reads chunk text and generates 30–80 Polish Q&A questions grounded in source text. Writes raw JSON to agent-ecosystem/extractor/outputs/<chunk>_raw.json.' },
+            { title: 'Phase 3 — Validate (EX1)', body: 'Re-run wolfmed_intake.py when generate tasks are done. EX1 (MODE: VALIDATE) checks each question: grounded in source? correct answer in text? distractors similar length? exactly one isCorrect: true? Removes failing questions — no fixes, no regeneration. Writes validated JSON to agent-ecosystem/extractor/outputs/<chunk>_validated.json.' },
+            { title: 'Phase 4 — Merge (Python only)', body: 'Fires automatically when validated_count == total_chunks. merge_utils.py loads all *_validated.json, normalises schema, deduplicates by question text, checks UUID uniqueness against extractor/data/wolfmed.db (SQLite), writes final file to extractor/done/<category>_all_merged.json.' },
+            { title: 'UUID Rules', body: 'All question IDs must be valid UUID v4: hex-only characters 0-9 and a-f, format xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx. Letters g–z are forbidden. EX1 agent.yaml enforces this. If bad UUIDs are found, run: python extractor/scripts/fix_uuids.py <merged_json> to repair both the JSON and wolfmed.db.' },
+            { title: 'How to Run — Full', body: '1. Copy PDF to extractor/intake/<category>/   2. python wolfmed_intake.py --category <name> [--skip-start N] [--skip-end N] [--auto-trim]   3. Wait for generate tasks (watch Wolfmed tab or AXEL_BRIEFING.md)   4. Re-run python wolfmed_intake.py --category <name> → queues validate tasks   5. Re-run again when validate done → merge fires automatically.' },
+            { title: 'How to Run — Resume', body: 'Intake is idempotent. Re-running the same command is always safe: existing manifest → skips re-chunking, done tasks → advances pipeline state, all validated → triggers merge. Just run: python wolfmed_intake.py --category <name>' },
+            { title: 'Wolfmed Tab', body: 'Shows pipeline stats (total books, merged, chunks, validated), per-book progress bar, trim info (pages skipped front/back, auto-trim badge), and per-chunk status table (pending → queued → extracted → validating → validated).' },
+            { title: 'Key Rules', body: 'One category per run — never mix categories. Do not delete manifest mid-run — it is the pipeline state. Do not run --watch without --category. Merge output is append-safe — UUID registry prevents duplicates across runs. Agent outputs go to agent-ecosystem/extractor/outputs/ (relative to WORKSPACE_ROOT).' },
         ],
     },
     {

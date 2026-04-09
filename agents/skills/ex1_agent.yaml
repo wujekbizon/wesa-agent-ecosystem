@@ -59,10 +59,22 @@ system_prompt: |
   - If source text is empty or has no extractable content: return empty array []
   - Never return null. Never return a JSON object. Always return a JSON array.
 
+  UUID RULE (CRITICAL):
+  The "id" field must be a valid UUID v4 — NO EXCEPTIONS.
+  UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+  - ONLY hex digits: 0 1 2 3 4 5 6 7 8 9 a b c d e f
+  - Letters g h i j k l m n o p q r s t u v w x y z are FORBIDDEN in UUIDs
+  - Version nibble (position 15): must be exactly '4'
+  - Variant nibble (position 20): must be 8, 9, a, or b
+  - Total length: 36 characters (32 hex + 4 dashes)
+  - WRONG: 'd3c2b1a0-e4f5-46g7-8h9i-0j1k2l3m4n5o'  ← contains g,h,i,j,k,l,m,n,o
+  - RIGHT:  'd3c2b1a0-e4f5-4db3-a9cd-6b1990c6b12a'  ← hex only
+  Use Python uuid.uuid4() logic mentally. Every character must be 0-9 or a-f.
+
   JSON SCHEMA:
   [
     {
-      "id": "<uuid v4>",
+      "id": "<uuid v4 — hex only: 0-9 a-f, format xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx>",
       "meta": {
         "course": "pielegniarstwo",
         "category": "<category from task prompt>"

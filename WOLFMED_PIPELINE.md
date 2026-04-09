@@ -1,7 +1,7 @@
 # Wolfmed Extractor Pipeline — Flow Documentation
 
-**Version**: 1.0
-**Last updated**: 2026-04-07
+**Version**: 1.1
+**Last updated**: 2026-04-09
 **Mode covered**: GENERATE (create questions from scratch)
 
 ---
@@ -56,13 +56,67 @@ C:\Users\wujek\WesaTeam\
 **Trigger**: `wolfmed_intake.py` finds a PDF in `intake/<category>/` with no existing manifest.
 **Script**: `pdf_chunker.py`
 **What happens**:
-- Splits PDF into fixed 10-page chunks
+- Applies page trimming (see options below) to skip non-content pages
+- Splits remaining pages into fixed 10-page chunks
 - Extracts text from each chunk to `.txt`
 - Writes chunks to `extractor/chunks/<category>/`
 - Creates `extractor/data/<book>_manifest.json` with all chunks at `status: pending`
 - Drops `wm-ex-<id>.json` task files into `agent-ecosystem/tasks/`
 
 **Manifest state after**: all chunks `queued`
+
+#### Chunker Trimming Options
+
+Two modes are available and can be combined. Static skip is applied first; auto-trim then refines within the remaining range.
+
+**Option 1 — Static trim** (hard, unconditional):
+
+```powershell
+python pdf_chunker.py book.pdf --category fizjologia --skip-start 12 --skip-end 5
+```
+
+- `--skip-start N` — always skip the first N pages (title, copyright, ToC, preface)
+- `--skip-end N` — always skip the last N pages (bibliography, index, blank pages)
+- Use when you know the book structure. Fastest option, zero overhead.
+
+**Option 2 — Auto-trim** (heuristic, content-aware):
+
+```powershell
+python pdf_chunker.py book.pdf --category fizjologia --auto-trim
+```
+
+- Scans up to 20 pages at each boundary (configurable with `--auto-trim-window N`)
+- Scores each page against skip signals:
+  - Nearly blank (< 150 chars)
+  - Table of contents — 3+ lines matching `"Chapter Title ......... 42"` pattern
+  - Dense short lines (> 72% of lines under 35 chars) — catches ToC and index pages
+  - Polish structural keywords: `spis treści`, `bibliografia`, `piśmiennictwo`, `indeks`, `©`, `isbn`, etc.
+  - Sparse page with any structural keyword
+- Prints per-page decision and reason to console during run
+- Stops scanning as soon as it finds the first (and last) content page — does not touch middle pages
+
+**Combined** (recommended for unknown books):
+
+```powershell
+python pdf_chunker.py book.pdf --category fizjologia --skip-start 3 --auto-trim
+```
+
+Hard-skip the known boilerplate pages first, then let auto-trim find the exact content boundary within the rest.
+
+**Manifest fields added by trimmer**:
+
+```json
+{
+  "total_pages": 320,
+  "content_pages": 298,
+  "content_start_page": 13,
+  "content_end_page": 310,
+  "skipped_front": 12,
+  "skipped_back": 10
+}
+```
+
+`auto_trim` key is also added to the manifest when `--auto-trim` is used, recording how many pages each mode trimmed.
 
 ---
 
@@ -123,7 +177,18 @@ cd C:\Users\wujek\WesaTeam\agent-ecosystem\scripts
 # (manually copy book.pdf to extractor\intake\fizjologia\)
 
 # Step 2: Chunk + queue generate tasks
+# Basic (no trimming):
 python wolfmed_intake.py --category fizjologia
+
+# With static trim (recommended if you know the book structure):
+python wolfmed_intake.py --category fizjologia --skip-start 12 --skip-end 5
+
+# With auto-trim (recommended for unknown books):
+python wolfmed_intake.py --category fizjologia --auto-trim
+
+# Combined:
+python wolfmed_intake.py --category fizjologia --skip-start 5 --auto-trim
+
 # → chunks created, wm-ex-* tasks dropped, daemon picks up automatically
 
 # Step 3: Wait for generate tasks to complete
