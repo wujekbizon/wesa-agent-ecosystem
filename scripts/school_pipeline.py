@@ -631,6 +631,37 @@ def stage_5(domain: dict, arch: dict) -> list[dict]:
         f"  {d}: {', '.join(names)}" for d, names in domains.items()
     )
 
+    # Intranet CSS — standalone file, no Bootstrap
+    tasks.append({
+        "task_id": new_id("school-intranet-css"),
+        "type": "write",
+        "prompt": f"""Write a complete custom CSS file for {ns}.Intranet — an admin panel application.
+
+This is the ONLY stylesheet. No Bootstrap, no CDN. All layout and styling must be defined here.
+
+Requirements:
+- .navbar: horizontal top nav bar, dark background (#2c3e50), white links, app name styled
+- .navbar a: white text, no underline, padding, hover highlight
+- .table: full-width table, border-collapse, alternating row background (#f9f9f9), header row dark
+- .btn: base button style — padding, border-radius, cursor
+- .btn-sm: smaller variant
+- .btn-outline: bordered button, transparent background
+- .btn-danger: red background for destructive actions
+- .btn-primary: blue background for primary actions
+- .form-card: centered form container, max-width 600px, padding, box-shadow, border-radius
+- .form-group: margin-bottom spacing for form fields
+- .form-control: full-width inputs, border, padding, border-radius
+- .card: box-shadow, border-radius, padding for detail views
+- dl dt dd: definition list styling for Details views
+- body: clean sans-serif font, light grey background (#f5f5f5), margin 0
+- main content area: padding 20px
+- General links: styled without underline, colored on hover
+
+Output ONLY the CSS — no explanations, no markdown fences. Output preceded by: // FILE: wwwroot/css/site.css
+""",
+        "output_file": school_path(sol, f"{sol}.Intranet", "wwwroot", "css", "site.css"),
+    })
+
     # Shared layout + _ViewImports + _ViewStart
     tasks.append({
         "task_id": new_id("school-intranet-shared"),
@@ -1081,6 +1112,42 @@ def stage_7(domain: dict, arch: dict) -> list[dict]:
     viewcomp_name = additional.get("D", {}).get("component_name") if "D" in additional else None
     viewcomp_applies = additional.get("D", {}).get("applies_to_controllers", []) if "D" in additional else []
 
+    # Portal CSS — standalone file, separate from Intranet
+    tasks.append({
+        "task_id": new_id("school-portal-css"),
+        "type": "write",
+        "prompt": f"""Write a complete custom CSS file for {ns}.PortalWWW — a public-facing freelance agent marketplace portal.
+
+This is the ONLY stylesheet. No Bootstrap, no CDN. Visually distinct from the admin Intranet.
+
+Requirements:
+- body: clean sans-serif font, white background, margin 0
+- .navbar: horizontal top nav, professional dark theme, logo/app name styled, links spaced
+- .navbar a: white text, no underline, hover highlight
+- .layout-main: full-width content wrapper, max-width 1200px, margin auto, padding 20px
+- .layout-sidebar: flex row — .sidebar (width 25%, padding-right 20px) + .content (flex 1)
+- .sidebar-nav: vertical list, no bullets, link styling for nav items
+- .card-grid: CSS grid, 3 columns, gap 20px, responsive (2 cols at medium, 1 at small)
+- .card: border-radius, box-shadow, padding, white background, hover lift effect
+- .card img: full-width, border-radius top, max-height 200px, object-fit cover
+- .card h3, .card p: typography for card content
+- .btn: base button, padding, border-radius, cursor
+- .btn-primary: branded color (e.g. #2980b9), white text
+- .btn-outline-secondary: bordered, transparent background
+- .form-card: centered form, max-width 600px, margin auto, padding, box-shadow
+- .form-group: spacing between form fields
+- .form-control: full-width inputs, border, padding, border-radius
+- Hero section (.hero): large banner area, background color, centered text, padding top/bottom 80px
+- .hero h1: large headline font
+- .hero p: subtitle text
+- footer (if any): simple dark footer
+- Responsive: use media queries for mobile/tablet breakpoints
+
+Output ONLY the CSS — no explanations, no markdown fences. Output preceded by: // FILE: wwwroot/css/site.css
+""",
+        "output_file": school_path(sol, f"{sol}.PortalWWW", "wwwroot", "css", "site.css"),
+    })
+
     # Layouts + partials
     tasks.append({
         "task_id": new_id("school-portal-layouts"),
@@ -1357,6 +1424,21 @@ def main() -> None:
 
     action = "listed (dry run)" if args.dry_run else "written to tasks/ — daemon picks up within 3s"
     print(f"\nDone. {total} task(s) {action}.")
+
+    # Auto-split multi-view outputs after Stage 5 (Intranet) and Stage 7 (Portal)
+    # Views tasks batch multiple files with // FILE: markers into one output_file.
+    # split_views.py reads those markers and writes each view to its correct path.
+    VIEW_STAGES = {5, 7}
+    stage_set = set(stage_nums)
+    if not args.dry_run and stage_set & VIEW_STAGES:
+        import subprocess, sys as _sys
+        sol = domain["solution"]["name"]
+        split_script = Path(__file__).parent / "split_views.py"
+        for n in sorted(stage_set & VIEW_STAGES):
+            proj = "Intranet" if n == 5 else "PortalWWW"
+            proj_path = config_path.parent / sol / f"{sol}.{proj}"
+            print(f"\n[split_views] NOTE: Run after daemon completes Stage {n}:")
+            print(f"  python scripts/split_views.py --project {proj_path}")
 
 
 if __name__ == "__main__":
