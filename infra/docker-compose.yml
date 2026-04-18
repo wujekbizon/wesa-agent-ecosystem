@@ -1,0 +1,153 @@
+###############################################################################
+# Lumio — Home Learning RAG Platform
+# Docker Compose — runs on Ubuntu VM on Greg's home LAN
+#
+# Usage:
+#   docker-compose up -d              # start all services
+#   docker-compose up -d tutor        # start single service
+#   docker-compose stop               # stop all
+#   docker-compose logs -f tutor      # follow logs
+#
+# K8s migration: kompose convert → generates manifests in infra/k8s/
+###############################################################################
+
+version: "3.9"
+
+networks:
+  lumio_network:
+    driver: bridge
+
+volumes:
+  chroma_data:
+    driver: local
+  session_data:
+    driver: local
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # infra_manager — control plane (Greg + web monitor only)
+  # ---------------------------------------------------------------------------
+  infra-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.infra_manager
+    container_name: lumio-infra-manager
+    restart: unless-stopped
+    ports:
+      - "${INFRA_MANAGER_PORT:-8766}:8766"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # Docker socket — required
+      - ./configs:/app/configs:ro
+      - ./docker-compose.yml:/app/docker-compose.yml:ro
+    environment:
+      - PORT=8766
+      - HOST=0.0.0.0
+      - SERVICES_CONFIG=/app/configs/services.yaml
+      - LOG_LEVEL=INFO
+    networks:
+      - lumio_network
+
+  # ---------------------------------------------------------------------------
+  # storage-service — per-user file upload + storage
+  # ---------------------------------------------------------------------------
+  storage:
+    build:
+      context: ./services/storage-service
+    container_name: lumio-storage
+    restart: unless-stopped
+    ports:
+      - "${STORAGE_PORT:-8767}:8767"
+    volumes:
+      - /home:/home                    # mounts Ubuntu /home — user folders live here
+    environment:
+      - PORT=8767
+      - STORAGE_BASE_PATH=/home
+    networks:
+      - lumio_network
+
+  # ---------------------------------------------------------------------------
+  # rag-service — ingestion pipeline + ChromaDB + query API
+  # ---------------------------------------------------------------------------
+  rag:
+    build:
+      context: ./services/rag-service
+    container_name: lumio-rag
+    restart: unless-stopped
+    ports:
+      - "${RAG_PORT:-8768}:8768"
+    volumes:
+      - chroma_data:/data/chroma       # persistent vector store
+      - /home:/home:ro                 # read-only access to user materials
+    environment:
+      - PORT=8768
+      - CHROMA_PERSIST_DIR=/data/chroma
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host-gateway:11434}
+      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      - STORAGE_BASE_PATH=/home
+    extra_hosts:
+      - "host-gateway:host-gateway"    # allows container to reach Windows Ollama on LAN
+    networks:
+      - lumio_network
+
+  # ---------------------------------------------------------------------------
+  # tutor-service — conversational AI tutor
+  # ---------------------------------------------------------------------------
+  tutor:
+    build:
+      context: ./services/tutor-service
+    container_name: lumio-tutor
+    restart: unless-stopped
+    ports:
+      - "${TUTOR_PORT:-8769}:8769"
+    environment:
+      - PORT=8769
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host-gateway:11434}
+      - OLLAMA_TUTOR_MODEL=${OLLAMA_TUTOR_MODEL:-qwen2.5:latest}
+      - RAG_SERVICE_URL=http://rag:8768
+    extra_hosts:
+      - "host-gateway:host-gateway"
+    networks:
+      - lumio_network
+    depends_on:
+      - rag
+
+  # ---------------------------------------------------------------------------
+  # time-watcher — study session tracking per user
+  # ---------------------------------------------------------------------------
+  time-watcher:
+    build:
+      context: ./services/time-watcher
+    container_name: lumio-time-watcher
+    restart: unless-stopped
+    ports:
+      - "${TIME_WATCHER_PORT:-8770}:8770"
+    volumes:
+      - session_data:/data/sessions
+    environment:
+      - PORT=8770
+      - SESSION_DATA_DIR=/data/sessions
+    networks:
+      - lumio_network
+
+  # ---------------------------------------------------------------------------
+  # ui — kids' web interface
+  # ---------------------------------------------------------------------------
+  ui:
+    build:
+      context: ./services/ui-service
+    container_name: lumio-ui
+    restart: unless-stopped
+    ports:
+      - "${UI_PORT:-3000}:3000"
+    environment:
+      - STORAGE_API=http://storage:8767
+      - RAG_API=http://rag:8768
+      - TUTOR_API=http://tutor:8769
+      - TIME_WATCHER_API=http://time-watcher:8770
+    networks:
+      - lumio_network
+    depends_on:
+      - storage
+      - tutor
+      - time-watcher
