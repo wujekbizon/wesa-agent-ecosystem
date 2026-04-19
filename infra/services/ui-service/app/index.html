@@ -375,6 +375,7 @@
   let currentUser = null;
   let chatHistory = [];
   let isStreaming = false;
+  let msgCounter = 0;
 
   // ---- Login ----
   function login() {
@@ -497,7 +498,7 @@
     if (empty) empty.remove();
 
     const msgs = document.getElementById('messages');
-    const id = `msg-${Date.now()}`;
+    const id = `msg-${Date.now()}-${++msgCounter}`;
     const avatar = role === 'user' ? currentUser[0].toUpperCase() : '✦';
     msgs.innerHTML += `
       <div class="message ${role}" id="${id}">
