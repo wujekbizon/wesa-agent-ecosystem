@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: infra-manager
+  namespace: lumio
+spec:
+  selector:
+    app: infra-manager
+  ports:
+    - port: 8766
+      targetPort: 8766
+      nodePort: 30766      # LAN access: http://192.168.1.62:30766
+  type: NodePort

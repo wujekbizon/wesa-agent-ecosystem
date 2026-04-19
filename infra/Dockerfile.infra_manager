@@ -2,11 +2,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir fastapi uvicorn docker pyyaml
+RUN pip install --no-cache-dir fastapi uvicorn kubernetes pyyaml
 
 COPY infra_manager.py .
 COPY configs/ ./configs/
 
 EXPOSE 8766
 
-CMD ["python", "infra_manager.py"]
+CMD ["uvicorn", "infra_manager:app", "--host", "0.0.0.0", "--port", "8766"]

@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storage-service
+  namespace: lumio
+  labels:
+    app: storage-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: storage-service
+  template:
+    metadata:
+      labels:
+        app: storage-service
+    spec:
+      containers:
+        - name: storage-service
+          image: lumio-storage:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8767
+          envFrom:
+            - configMapRef:
+                name: lumio-config
+          volumeMounts:
+            - name: home-storage
+              mountPath: /home
+      volumes:
+        - name: home-storage
+          hostPath:
+            path: /home
+            type: Directory

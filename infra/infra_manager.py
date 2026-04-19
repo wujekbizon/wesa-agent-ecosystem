@@ -1,8 +1,11 @@
 """
-Lumio Infrastructure Manager
-FastAPI service that manages Docker containers for the Lumio learning platform.
-Runs on Ubuntu VM, exposed to LAN at port 8766.
-WESA web monitor talks to this API to spawn/kill/inspect services.
+Lumio Infrastructure Manager — Kubernetes Edition
+FastAPI service that manages K8s Deployments in the lumio namespace.
+Runs as a pod inside K3s with a ServiceAccount.
+Exposed via NodePort to LAN so web monitor on Windows PC can reach it.
+
+Scale up   = replicas 0 → 1  (start)
+Scale down = replicas 1 → 0  (stop)
 """
 
 import os
@@ -10,33 +13,38 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-import docker
-from docker.errors import DockerException, NotFound, APIError
+import yaml as pyyaml
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-import yaml
+from kubernetes import client, config
+from kubernetes.client.rest import ApiException
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
+NAMESPACE = os.environ.get("LUMIO_NAMESPACE", "lumio")
 SERVICES_CONFIG_PATH = os.environ.get("SERVICES_CONFIG", "/app/configs/services.yaml")
-COMPOSE_FILE_PATH = os.environ.get("COMPOSE_FILE", "/app/docker-compose.yml")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("infra_manager")
 
 # ---------------------------------------------------------------------------
-# Docker client
+# Kubernetes client — in-cluster when running as pod
 # ---------------------------------------------------------------------------
 try:
-    docker_client = docker.from_env()
-    docker_client.ping()
-    log.info("Docker daemon connected.")
-except DockerException as e:
-    log.error(f"Cannot connect to Docker daemon: {e}")
-    docker_client = None
+    config.load_incluster_config()
+    log.info("Loaded in-cluster Kubernetes config.")
+except config.ConfigException:
+    try:
+        config.load_kube_config()
+        log.info("Loaded kubeconfig from file.")
+    except Exception as e:
+        log.error(f"Cannot load Kubernetes config: {e}")
+
+apps_v1 = client.AppsV1Api()
+core_v1 = client.CoreV1Api()
 
 # ---------------------------------------------------------------------------
 # Service registry
@@ -44,14 +52,74 @@ except DockerException as e:
 def load_services_config() -> dict:
     try:
         with open(SERVICES_CONFIG_PATH) as f:
-            return yaml.safe_load(f)
+            return pyyaml.safe_load(f)
     except FileNotFoundError:
-        log.warning(f"services.yaml not found at {SERVICES_CONFIG_PATH}, using empty registry")
         return {"services": {}}
 
 
-def get_service_container_name(service_name: str) -> str:
-    return f"lumio-{service_name}"
+def deployment_name(service_id: str) -> str:
+    return service_id  # deployment names match service IDs in manifests
+
+
+# ---------------------------------------------------------------------------
+# K8s helpers
+# ---------------------------------------------------------------------------
+def get_deployment_status(name: str) -> dict:
+    try:
+        dep = apps_v1.read_namespaced_deployment(name=name, namespace=NAMESPACE)
+        replicas = dep.spec.replicas or 0
+        ready = dep.status.ready_replicas or 0
+        running = replicas > 0 and ready > 0
+        return {
+            "name": name,
+            "replicas": replicas,
+            "ready_replicas": ready,
+            "running": running,
+            "status": "running" if running else ("starting" if replicas > 0 else "stopped"),
+        }
+    except ApiException as e:
+        if e.status == 404:
+            return {"name": name, "running": False, "status": "not_deployed"}
+        return {"name": name, "running": False, "status": "error", "error": str(e)}
+
+
+def scale_deployment(name: str, replicas: int) -> dict:
+    try:
+        patch = {"spec": {"replicas": replicas}}
+        apps_v1.patch_namespaced_deployment(
+            name=name,
+            namespace=NAMESPACE,
+            body=patch,
+        )
+        action = "started" if replicas > 0 else "stopped"
+        log.info(f"Scaled {name} to {replicas} replicas → {action}")
+        return {"status": action, "deployment": name, "replicas": replicas}
+    except ApiException as e:
+        if e.status == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Deployment '{name}' not found in namespace '{NAMESPACE}'. Run deploy.sh first."
+            )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def get_pod_logs(deployment_name: str, tail: int = 100) -> str:
+    try:
+        pods = core_v1.list_namespaced_pod(
+            namespace=NAMESPACE,
+            label_selector=f"app={deployment_name}",
+        )
+        if not pods.items:
+            return f"No pods found for deployment '{deployment_name}'"
+        pod = pods.items[0]
+        logs = core_v1.read_namespaced_pod_log(
+            name=pod.metadata.name,
+            namespace=NAMESPACE,
+            tail_lines=tail,
+        )
+        return logs
+    except ApiException as e:
+        return f"Error fetching logs: {e}"
 
 
 # ---------------------------------------------------------------------------
@@ -59,13 +127,13 @@ def get_service_container_name(service_name: str) -> str:
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="Lumio Infrastructure Manager",
-    description="Controls Docker containers for the Lumio home learning platform",
-    version="1.0.0",
+    description="Controls K8s Deployments for the Lumio home learning platform",
+    version="2.0.0",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # home LAN only — no public exposure
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -76,63 +144,36 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 @app.get("/health")
 def health():
-    docker_ok = docker_client is not None
     try:
-        if docker_ok:
-            docker_client.ping()
+        apps_v1.list_namespaced_deployment(namespace=NAMESPACE, limit=1)
+        k8s_ok = True
     except Exception:
-        docker_ok = False
+        k8s_ok = False
     return {
-        "status": "ok" if docker_ok else "degraded",
-        "docker": docker_ok,
+        "status": "ok" if k8s_ok else "degraded",
+        "kubernetes": k8s_ok,
+        "namespace": NAMESPACE,
         "timestamp": datetime.utcnow().isoformat(),
     }
 
 
 # ---------------------------------------------------------------------------
-# Service status helpers
-# ---------------------------------------------------------------------------
-def _container_status(container_name: str) -> dict:
-    """Return status dict for a named container."""
-    if not docker_client:
-        return {"name": container_name, "status": "unknown", "error": "docker unavailable"}
-    try:
-        container = docker_client.containers.get(container_name)
-        attrs = container.attrs
-        state = attrs.get("State", {})
-        return {
-            "name": container_name,
-            "status": container.status,           # running / exited / paused / ...
-            "running": state.get("Running", False),
-            "started_at": state.get("StartedAt"),
-            "finished_at": state.get("FinishedAt"),
-            "image": container.image.tags[0] if container.image.tags else "unknown",
-            "ports": attrs.get("NetworkSettings", {}).get("Ports", {}),
-        }
-    except NotFound:
-        return {"name": container_name, "status": "not_found", "running": False}
-    except APIError as e:
-        return {"name": container_name, "status": "error", "error": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# Routes — service list
+# Service list
 # ---------------------------------------------------------------------------
 @app.get("/services")
 def list_services():
-    """List all known Lumio services with their live Docker status."""
-    config = load_services_config()
-    services = config.get("services", {})
+    config_data = load_services_config()
+    services = config_data.get("services", {})
     result = []
-    for name, meta in services.items():
-        container_name = get_service_container_name(name)
-        status = _container_status(container_name)
+    for svc_id, meta in services.items():
+        dep_name = deployment_name(svc_id)
+        status = get_deployment_status(dep_name)
         result.append({
-            "id": name,
-            "display_name": meta.get("display_name", name),
+            "id": svc_id,
+            "display_name": meta.get("display_name", svc_id),
             "description": meta.get("description", ""),
             "port": meta.get("port"),
-            "container": container_name,
+            "deployment": dep_name,
             **status,
         })
     return {"services": result, "count": len(result)}
@@ -140,159 +181,82 @@ def list_services():
 
 @app.get("/services/{service_name}")
 def get_service(service_name: str):
-    """Get status for a single service."""
-    config = load_services_config()
-    services = config.get("services", {})
-    if service_name not in services:
+    config_data = load_services_config()
+    if service_name not in config_data.get("services", {}):
         raise HTTPException(status_code=404, detail=f"Service '{service_name}' not in registry")
-    meta = services[service_name]
-    container_name = get_service_container_name(service_name)
-    status = _container_status(container_name)
+    meta = config_data["services"][service_name]
+    dep_name = deployment_name(service_name)
+    status = get_deployment_status(dep_name)
     return {
         "id": service_name,
         "display_name": meta.get("display_name", service_name),
         "description": meta.get("description", ""),
         "port": meta.get("port"),
-        "container": container_name,
+        "deployment": dep_name,
         **status,
     }
 
 
 # ---------------------------------------------------------------------------
-# Routes — service control
+# Control
 # ---------------------------------------------------------------------------
 @app.post("/services/{service_name}/start")
 def start_service(service_name: str):
-    """Start a stopped/exited container."""
-    if not docker_client:
-        raise HTTPException(status_code=503, detail="Docker daemon unavailable")
-    container_name = get_service_container_name(service_name)
-    try:
-        container = docker_client.containers.get(container_name)
-        if container.status == "running":
-            return {"status": "already_running", "container": container_name}
-        container.start()
-        log.info(f"Started container: {container_name}")
-        return {"status": "started", "container": container_name}
-    except NotFound:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Container '{container_name}' not found. Run docker-compose up first."
-        )
-    except APIError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return scale_deployment(deployment_name(service_name), replicas=1)
 
 
 @app.post("/services/{service_name}/stop")
 def stop_service(service_name: str):
-    """Stop a running container (graceful)."""
-    if not docker_client:
-        raise HTTPException(status_code=503, detail="Docker daemon unavailable")
-    container_name = get_service_container_name(service_name)
-    try:
-        container = docker_client.containers.get(container_name)
-        if container.status != "running":
-            return {"status": "already_stopped", "container": container_name}
-        container.stop(timeout=10)
-        log.info(f"Stopped container: {container_name}")
-        return {"status": "stopped", "container": container_name}
-    except NotFound:
-        raise HTTPException(status_code=404, detail=f"Container '{container_name}' not found")
-    except APIError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return scale_deployment(deployment_name(service_name), replicas=0)
 
 
 @app.post("/services/{service_name}/restart")
 def restart_service(service_name: str):
-    """Restart a container."""
-    if not docker_client:
-        raise HTTPException(status_code=503, detail="Docker daemon unavailable")
-    container_name = get_service_container_name(service_name)
-    try:
-        container = docker_client.containers.get(container_name)
-        container.restart(timeout=10)
-        log.info(f"Restarted container: {container_name}")
-        return {"status": "restarted", "container": container_name}
-    except NotFound:
-        raise HTTPException(status_code=404, detail=f"Container '{container_name}' not found")
-    except APIError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    scale_deployment(deployment_name(service_name), replicas=0)
+    import time; time.sleep(2)
+    return scale_deployment(deployment_name(service_name), replicas=1)
 
 
 @app.post("/services/start-all")
 def start_all():
-    """Start all known services."""
-    config = load_services_config()
+    config_data = load_services_config()
     results = {}
-    for name in config.get("services", {}):
+    for svc_id in config_data.get("services", {}):
         try:
-            container = docker_client.containers.get(get_service_container_name(name))
-            if container.status != "running":
-                container.start()
-                results[name] = "started"
-            else:
-                results[name] = "already_running"
-        except NotFound:
-            results[name] = "not_found"
+            scale_deployment(deployment_name(svc_id), replicas=1)
+            results[svc_id] = "started"
         except Exception as e:
-            results[name] = f"error: {e}"
+            results[svc_id] = f"error: {e}"
     return {"results": results}
 
 
 @app.post("/services/stop-all")
 def stop_all():
-    """Stop all running Lumio services."""
-    config = load_services_config()
+    config_data = load_services_config()
     results = {}
-    for name in config.get("services", {}):
+    for svc_id in config_data.get("services", {}):
         try:
-            container = docker_client.containers.get(get_service_container_name(name))
-            if container.status == "running":
-                container.stop(timeout=10)
-                results[name] = "stopped"
-            else:
-                results[name] = "already_stopped"
-        except NotFound:
-            results[name] = "not_found"
+            scale_deployment(deployment_name(svc_id), replicas=0)
+            results[svc_id] = "stopped"
         except Exception as e:
-            results[name] = f"error: {e}"
+            results[svc_id] = f"error: {e}"
     return {"results": results}
 
 
 # ---------------------------------------------------------------------------
-# Routes — logs
+# Logs
 # ---------------------------------------------------------------------------
 @app.get("/services/{service_name}/logs")
-def get_logs(service_name: str, tail: int = 100, stream: bool = False):
-    """
-    Get container logs.
-    tail=N returns last N lines.
-    stream=true returns a streaming response (SSE-compatible).
-    """
-    if not docker_client:
-        raise HTTPException(status_code=503, detail="Docker daemon unavailable")
-    container_name = get_service_container_name(service_name)
-    try:
-        container = docker_client.containers.get(container_name)
-        if stream:
-            def log_stream():
-                for chunk in container.logs(stream=True, follow=True, tail=tail):
-                    yield f"data: {chunk.decode('utf-8', errors='replace')}\n\n"
-            return StreamingResponse(log_stream(), media_type="text/event-stream")
-        else:
-            logs = container.logs(tail=tail).decode("utf-8", errors="replace")
-            return {"container": container_name, "logs": logs}
-    except NotFound:
-        raise HTTPException(status_code=404, detail=f"Container '{container_name}' not found")
-    except APIError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def get_logs(service_name: str, tail: int = 100):
+    dep_name = deployment_name(service_name)
+    logs = get_pod_logs(dep_name, tail=tail)
+    return {"deployment": dep_name, "logs": logs}
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Entry point (for local dev — in K8s it's run by uvicorn in Dockerfile)
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8766))
-    host = os.environ.get("HOST", "0.0.0.0")
-    uvicorn.run("infra_manager:app", host=host, port=port, reload=False)
+    uvicorn.run("infra_manager:app", host="0.0.0.0", port=port, reload=False)

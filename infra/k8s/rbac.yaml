@@ -1,0 +1,35 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: infra-manager-sa
+  namespace: lumio
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: infra-manager-role
+  namespace: lumio
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: infra-manager-rolebinding
+  namespace: lumio
+subjects:
+  - kind: ServiceAccount
+    name: infra-manager-sa
+    namespace: lumio
+roleRef:
+  kind: Role
+  name: infra-manager-role
+  apiGroup: rbac.authorization.k8s.io

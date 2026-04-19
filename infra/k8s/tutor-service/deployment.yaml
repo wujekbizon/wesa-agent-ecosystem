@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tutor-service
+  namespace: lumio
+  labels:
+    app: tutor-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tutor-service
+  template:
+    metadata:
+      labels:
+        app: tutor-service
+    spec:
+      containers:
+        - name: tutor-service
+          image: lumio-tutor:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8769
+          envFrom:
+            - configMapRef:
+                name: lumio-config

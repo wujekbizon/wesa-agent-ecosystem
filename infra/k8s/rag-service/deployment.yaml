@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-service
+  namespace: lumio
+  labels:
+    app: rag-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rag-service
+  template:
+    metadata:
+      labels:
+        app: rag-service
+    spec:
+      containers:
+        - name: rag-service
+          image: lumio-rag:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8768
+          envFrom:
+            - configMapRef:
+                name: lumio-config
+          volumeMounts:
+            - name: chroma-data
+              mountPath: /data/chroma
+            - name: home-storage
+              mountPath: /home
+              readOnly: true
+      volumes:
+        - name: chroma-data
+          persistentVolumeClaim:
+            claimName: chroma-pvc
+        - name: home-storage
+          hostPath:
+            path: /home
+            type: Directory

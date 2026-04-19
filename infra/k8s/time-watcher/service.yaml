@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: time-watcher-service
+  namespace: lumio
+spec:
+  selector:
+    app: time-watcher
+  ports:
+    - port: 8770
+      targetPort: 8770
+  type: ClusterIP

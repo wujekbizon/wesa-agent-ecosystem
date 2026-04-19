@@ -3,17 +3,17 @@
 # All other values are internal Docker network settings.
 
 # The Ubuntu VM's static LAN IP
-ubuntu_vm_ip: "192.168.1.50"          # CHANGE THIS to your actual VM IP
+ubuntu_vm_ip: "192.168.1.62"
 
 # infra_manager — Greg/web monitor control plane
 infra_manager:
   host: "0.0.0.0"
   port: 8766
-  lan_url: "http://192.168.1.50:8766"  # CHANGE IP to match ubuntu_vm_ip
+  lan_url: "http://192.168.1.62:30766"
 
 # Ollama on Greg's Windows PC — called by tutor and rag services
 ollama:
-  lan_url: "http://192.168.1.1:11434"  # CHANGE THIS to Greg's Windows PC LAN IP
+  lan_url: "http://192.168.1.12:11434"
   embedding_model: "nomic-embed-text"
   tutor_model: "qwen2.5:latest"        # Update to whichever model Greg prefers
 

@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: time-watcher
+  namespace: lumio
+  labels:
+    app: time-watcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: time-watcher
+  template:
+    metadata:
+      labels:
+        app: time-watcher
+    spec:
+      containers:
+        - name: time-watcher
+          image: lumio-time-watcher:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8770
+          envFrom:
+            - configMapRef:
+                name: lumio-config
+          volumeMounts:
+            - name: session-data
+              mountPath: /data/sessions
+      volumes:
+        - name: session-data
+          persistentVolumeClaim:
+            claimName: sessions-pvc
