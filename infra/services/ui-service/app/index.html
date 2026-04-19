@@ -317,8 +317,10 @@
   <div class="lumio-tagline">Your personal learning space</div>
   <div class="login-card">
     <label for="username-input">Your name</label>
-    <input type="text" id="username-input" placeholder="e.g. emma" autocomplete="off" />
-    <button class="btn btn-primary" onclick="login()">Start learning</button>
+    <input type="text" id="username-input" placeholder="e.g. kinga" autocomplete="username" />
+    <label for="password-input">Password</label>
+    <input type="password" id="password-input" placeholder="••••••••••••••••" autocomplete="current-password" />
+    <button class="btn btn-primary" id="login-btn" onclick="login()">Start learning</button>
   </div>
 </div>
 
@@ -376,18 +378,85 @@
   let chatHistory = [];
   let isStreaming = false;
   let msgCounter = 0;
+  let registeredUsers = [];
+
+  // ---- Load registered users on startup ----
+  async function loadRegisteredUsers() {
+    try {
+      const res = await fetch('/api/users');
+      const data = await res.json();
+      registeredUsers = data.users || [];
+    } catch (e) {
+      console.warn('Could not load user list:', e);
+    }
+  }
+  loadRegisteredUsers();
 
   // ---- Login ----
-  function login() {
-    const input = document.getElementById('username-input');
-    const username = input.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    if (!username) return;
-    currentUser = username;
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app').style.display = 'flex';
-    document.getElementById('user-label').textContent = username;
-    loadFiles();
-    loadStats();
+  function showLoginError(msg) {
+    let el = document.getElementById('login-error');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'login-error';
+      el.style.cssText = 'color:var(--danger);font-size:0.82rem;text-align:center;margin-top:-4px;';
+      document.querySelector('.login-card').appendChild(el);
+    }
+    el.textContent = msg;
+  }
+
+  function clearLoginError() {
+    const el = document.getElementById('login-error');
+    if (el) el.textContent = '';
+  }
+
+  async function login() {
+    const usernameInput = document.getElementById('username-input');
+    const passwordInput = document.getElementById('password-input');
+    const btn = document.getElementById('login-btn');
+
+    const username = usernameInput.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    const password = passwordInput.value;
+
+    if (!username) { showLoginError('Please enter your name.'); return; }
+    if (!password) { showLoginError('Please enter your password.'); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Checking...';
+    clearLoginError();
+
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      if (res.status === 401) {
+        showLoginError('Invalid username or password.');
+        passwordInput.value = '';
+        return;
+      }
+
+      if (!res.ok) {
+        showLoginError('Login failed. Try again.');
+        return;
+      }
+
+      clearLoginError();
+      passwordInput.value = '';
+      currentUser = username;
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('app').style.display = 'flex';
+      document.getElementById('user-label').textContent = username;
+      loadFiles();
+      loadStats();
+
+    } catch (e) {
+      showLoginError('Cannot reach server. Is Lumio running?');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Start learning';
+    }
   }
 
   function logout() {
@@ -408,6 +477,9 @@
   }
 
   document.getElementById('username-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('password-input').focus();
+  });
+  document.getElementById('password-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') login();
   });
 

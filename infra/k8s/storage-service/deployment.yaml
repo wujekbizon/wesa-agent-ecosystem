@@ -27,8 +27,15 @@ spec:
           volumeMounts:
             - name: home-storage
               mountPath: /home
+            - name: lumio-passwords
+              mountPath: /etc/lumio
+              readOnly: true
       volumes:
         - name: home-storage
           hostPath:
             path: /home
+            type: Directory
+        - name: lumio-passwords
+          hostPath:
+            path: /etc/lumio
             type: Directory

@@ -41,6 +41,21 @@ async def root():
 # BFF proxy routes — kids' browser never knows about internal ports
 # ---------------------------------------------------------------------------
 
+@app.get("/api/users")
+async def list_users():
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(f"{STORAGE_API}/users")
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+
+
+@app.post("/api/auth")
+async def auth(request: Request):
+    body = await request.json()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post(f"{STORAGE_API}/auth", json=body)
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+
+
 @app.get("/api/files/{username}")
 async def list_files(username: str):
     async with httpx.AsyncClient(timeout=15.0) as client:

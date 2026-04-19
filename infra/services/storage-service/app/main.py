@@ -11,12 +11,16 @@ from datetime import datetime
 from typing import List
 
 import aiofiles
+import bcrypt
+import yaml
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 STORAGE_BASE = Path(os.environ.get("STORAGE_BASE_PATH", "/home"))
 MATERIALS_SUBDIR = "materials"
+PASSWORDS_FILE = Path(os.environ.get("PASSWORDS_FILE", "/etc/lumio/passwords.yaml"))
 
 app = FastAPI(title="Lumio Storage Service", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -37,11 +41,68 @@ def validate_username(username: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+def load_password_hashes() -> dict:
+    """Read passwords.yaml fresh on every call — no restart needed after changes."""
+    if not PASSWORDS_FILE.exists():
+        return {}
+    try:
+        with open(PASSWORDS_FILE) as f:
+            data = yaml.safe_load(f)
+            return data.get("users", {}) if data else {}
+    except Exception:
+        return {}
+
+
+class AuthRequest(BaseModel):
+    username: str
+    password: str
+
+
+# ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 @app.get("/health")
 def health():
     return {"status": "ok", "base_path": str(STORAGE_BASE)}
+
+
+# ---------------------------------------------------------------------------
+# Auth — validate username + password against passwords.yaml
+# ---------------------------------------------------------------------------
+@app.post("/auth")
+def authenticate(req: AuthRequest):
+    username = req.username.strip().lower()
+    hashes = load_password_hashes()
+
+    if username not in hashes:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    stored_hash = hashes[username]
+    try:
+        valid = bcrypt.checkpw(req.password.encode(), stored_hash.encode())
+    except Exception:
+        raise HTTPException(status_code=500, detail="Auth error")
+
+    if not valid:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    return {"ok": True, "username": username}
+
+
+# ---------------------------------------------------------------------------
+# Registered users — directories under /home that have a materials/ subfolder
+# ---------------------------------------------------------------------------
+@app.get("/users")
+def list_users():
+    users = []
+    if not STORAGE_BASE.exists():
+        return {"users": users}
+    for entry in sorted(STORAGE_BASE.iterdir()):
+        if entry.is_dir() and (entry / MATERIALS_SUBDIR).exists():
+            users.append(entry.name)
+    return {"users": users}
 
 
 # ---------------------------------------------------------------------------
