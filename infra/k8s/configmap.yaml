@@ -7,7 +7,7 @@ data:
   # Ollama on Greg's Windows PC — update IP if it changes
   OLLAMA_BASE_URL: "http://192.168.1.12:11434"
   OLLAMA_EMBEDDING_MODEL: "nomic-embed-text"
-  OLLAMA_TUTOR_MODEL: "qwen2.5:latest"
+  OLLAMA_TUTOR_MODEL: "gemma4:26b"
   STORAGE_BASE_PATH: "/home"
   CHROMA_PERSIST_DIR: "/data/chroma"
   SESSION_DATA_DIR: "/data/sessions"
