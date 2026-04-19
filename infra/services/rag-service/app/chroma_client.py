@@ -12,7 +12,7 @@ log = logging.getLogger("rag.chroma")
 
 CHROMA_PERSIST_DIR = os.environ.get("CHROMA_PERSIST_DIR", "/data/chroma")
 
-_client: chromadb.PersistentClient | None = None
+_client = None
 
 
 def get_client() -> chromadb.PersistentClient:
