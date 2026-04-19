@@ -11,8 +11,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Any, Dict, List
 
+import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -25,6 +26,7 @@ from src.staging_queue import StagingQueue
 
 # --- Configuration ---
 PORT = 8765
+LUMIO_INFRA_MANAGER_URL = os.environ.get("LUMIO_INFRA_MANAGER_URL", "http://192.168.1.62:30766")
 DB_PATH = BASE_DIR / "logs" / "tasks.db"
 LOGS_DIR = BASE_DIR / "logs"
 LOGS_DESIGNS_DIR = LOGS_DIR / "designs"
@@ -792,6 +794,75 @@ async def get_axel_activity_log(lines: int = 80):
         return {"lines": all_lines[-lines:], "exists": True, "total": len(all_lines)}
     except Exception as e:
         return {"lines": [f"Error reading log: {e}"], "exists": True, "total": 0}
+
+# --- Lumio Infra Proxy ---
+
+async def _infra_get(path: str) -> JSONResponse:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{LUMIO_INFRA_MANAGER_URL}{path}")
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Infra manager unreachable. Is Debian VM running?")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _infra_post(path: str, body: dict = None) -> JSONResponse:
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(f"{LUMIO_INFRA_MANAGER_URL}{path}", json=body or {})
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Infra manager unreachable. Is Debian VM running?")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/infra/health")
+async def infra_health():
+    return await _infra_get("/health")
+
+
+@app.get("/api/infra/services")
+async def infra_list_services():
+    return await _infra_get("/services")
+
+
+@app.get("/api/infra/services/{service_name}")
+async def infra_get_service(service_name: str):
+    return await _infra_get(f"/services/{service_name}")
+
+
+@app.post("/api/infra/services/{service_name}/start")
+async def infra_start_service(service_name: str):
+    return await _infra_post(f"/services/{service_name}/start")
+
+
+@app.post("/api/infra/services/{service_name}/stop")
+async def infra_stop_service(service_name: str):
+    return await _infra_post(f"/services/{service_name}/stop")
+
+
+@app.post("/api/infra/services/{service_name}/restart")
+async def infra_restart_service(service_name: str):
+    return await _infra_post(f"/services/{service_name}/restart")
+
+
+@app.post("/api/infra/services/start-all")
+async def infra_start_all():
+    return await _infra_post("/services/start-all")
+
+
+@app.post("/api/infra/services/stop-all")
+async def infra_stop_all():
+    return await _infra_post("/services/stop-all")
+
+
+@app.get("/api/infra/services/{service_name}/logs")
+async def infra_get_logs(service_name: str, tail: int = 100):
+    return await _infra_get(f"/services/{service_name}/logs?tail={tail}")
+
 
 # --- WebSocket ---
 

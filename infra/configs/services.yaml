@@ -8,27 +8,32 @@ services:
     description: "Handles file uploads per user. Stores materials in /home/{user}/materials/"
     port: 8767
     category: core
+    deployment: storage-service
 
   rag:
     display_name: "RAG Service"
     description: "Ingestion pipeline, ChromaDB vector store, semantic query API"
     port: 8768
     category: core
+    deployment: rag-service
 
   tutor:
     display_name: "Tutor Service"
     description: "Conversational AI tutor. Uses RAG context. Calls Ollama LLM over LAN."
     port: 8769
     category: learning
+    deployment: tutor-service
 
   time-watcher:
     display_name: "Time Watcher"
     description: "Tracks study session duration per user. Reports to Greg."
     port: 8770
     category: monitoring
+    deployment: time-watcher
 
   ui:
     display_name: "Lumio UI"
     description: "Kids web interface — upload materials, chat with tutor, view study time"
     port: 3000
     category: frontend
+    deployment: ui-service

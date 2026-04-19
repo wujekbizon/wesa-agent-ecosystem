@@ -57,8 +57,11 @@ def load_services_config() -> dict:
         return {"services": {}}
 
 
-def deployment_name(service_id: str) -> str:
-    return service_id  # deployment names match service IDs in manifests
+def deployment_name(service_id: str, meta: dict = None) -> str:
+    """Resolve K8s deployment name. Uses 'deployment' field from services.yaml if present."""
+    if meta and meta.get("deployment"):
+        return meta["deployment"]
+    return service_id
 
 
 # ---------------------------------------------------------------------------
@@ -160,13 +163,21 @@ def health():
 # ---------------------------------------------------------------------------
 # Service list
 # ---------------------------------------------------------------------------
+def _resolve_dep(service_name: str, config_data: dict = None) -> str:
+    """Get K8s deployment name for a service ID, respecting 'deployment' field in config."""
+    if config_data is None:
+        config_data = load_services_config()
+    meta = config_data.get("services", {}).get(service_name, {})
+    return deployment_name(service_name, meta)
+
+
 @app.get("/services")
 def list_services():
     config_data = load_services_config()
     services = config_data.get("services", {})
     result = []
     for svc_id, meta in services.items():
-        dep_name = deployment_name(svc_id)
+        dep_name = deployment_name(svc_id, meta)
         status = get_deployment_status(dep_name)
         result.append({
             "id": svc_id,
@@ -185,7 +196,7 @@ def get_service(service_name: str):
     if service_name not in config_data.get("services", {}):
         raise HTTPException(status_code=404, detail=f"Service '{service_name}' not in registry")
     meta = config_data["services"][service_name]
-    dep_name = deployment_name(service_name)
+    dep_name = deployment_name(service_name, meta)
     status = get_deployment_status(dep_name)
     return {
         "id": service_name,
@@ -202,28 +213,29 @@ def get_service(service_name: str):
 # ---------------------------------------------------------------------------
 @app.post("/services/{service_name}/start")
 def start_service(service_name: str):
-    return scale_deployment(deployment_name(service_name), replicas=1)
+    return scale_deployment(_resolve_dep(service_name), replicas=1)
 
 
 @app.post("/services/{service_name}/stop")
 def stop_service(service_name: str):
-    return scale_deployment(deployment_name(service_name), replicas=0)
+    return scale_deployment(_resolve_dep(service_name), replicas=0)
 
 
 @app.post("/services/{service_name}/restart")
 def restart_service(service_name: str):
-    scale_deployment(deployment_name(service_name), replicas=0)
+    dep = _resolve_dep(service_name)
+    scale_deployment(dep, replicas=0)
     import time; time.sleep(2)
-    return scale_deployment(deployment_name(service_name), replicas=1)
+    return scale_deployment(dep, replicas=1)
 
 
 @app.post("/services/start-all")
 def start_all():
     config_data = load_services_config()
     results = {}
-    for svc_id in config_data.get("services", {}):
+    for svc_id, meta in config_data.get("services", {}).items():
         try:
-            scale_deployment(deployment_name(svc_id), replicas=1)
+            scale_deployment(deployment_name(svc_id, meta), replicas=1)
             results[svc_id] = "started"
         except Exception as e:
             results[svc_id] = f"error: {e}"
@@ -234,9 +246,9 @@ def start_all():
 def stop_all():
     config_data = load_services_config()
     results = {}
-    for svc_id in config_data.get("services", {}):
+    for svc_id, meta in config_data.get("services", {}).items():
         try:
-            scale_deployment(deployment_name(svc_id), replicas=0)
+            scale_deployment(deployment_name(svc_id, meta), replicas=0)
             results[svc_id] = "stopped"
         except Exception as e:
             results[svc_id] = f"error: {e}"
@@ -248,7 +260,7 @@ def stop_all():
 # ---------------------------------------------------------------------------
 @app.get("/services/{service_name}/logs")
 def get_logs(service_name: str, tail: int = 100):
-    dep_name = deployment_name(service_name)
+    dep_name = _resolve_dep(service_name)
     logs = get_pod_logs(dep_name, tail=tail)
     return {"deployment": dep_name, "logs": logs}
 

@@ -879,6 +879,176 @@ const WolfmedPanel = ({ addToast }) => {
     );
 };
 
+const InfraPanel = ({ addToast }) => {
+    const [services, setServices] = React.useState([]);
+    const [loading, setLoading] = React.useState(true);
+    const [error, setError] = React.useState(null);
+    const [logsPanel, setLogsPanel] = React.useState(null); // { serviceId, logs, loading }
+    const pollRef = React.useRef(null);
+
+    const loadServices = React.useCallback(async () => {
+        try {
+            const data = await apiFetch('/infra/services');
+            setServices(data.services || []);
+            setError(null);
+        } catch (e) {
+            setError(e.message);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    React.useEffect(() => {
+        loadServices();
+        pollRef.current = setInterval(loadServices, 8000);
+        return () => clearInterval(pollRef.current);
+    }, [loadServices]);
+
+    const infraAction = async (serviceId, action) => {
+        try {
+            await apiFetch(`/infra/services/${serviceId}/${action}`, 'POST');
+            addToast(`${serviceId} ${action} sent.`, 'info');
+            setTimeout(loadServices, 1500);
+        } catch (e) {
+            addToast(`${action} failed: ${e.message}`, 'error');
+        }
+    };
+
+    const showLogs = async (serviceId) => {
+        setLogsPanel({ serviceId, logs: null, loading: true });
+        try {
+            const data = await apiFetch(`/infra/services/${serviceId}/logs?tail=100`);
+            setLogsPanel({ serviceId, logs: data.logs || '(no logs)', loading: false });
+        } catch (e) {
+            setLogsPanel({ serviceId, logs: `Error: ${e.message}`, loading: false });
+        }
+    };
+
+    const startAll = async () => {
+        try {
+            await apiFetch('/infra/services/start-all', 'POST');
+            addToast('Start all sent.', 'info');
+            setTimeout(loadServices, 2000);
+        } catch (e) { addToast(`Start all failed: ${e.message}`, 'error'); }
+    };
+
+    const stopAll = async () => {
+        if (!window.confirm('Stop all Lumio services?')) return;
+        try {
+            await apiFetch('/infra/services/stop-all', 'POST');
+            addToast('Stop all sent.', 'info');
+            setTimeout(loadServices, 2000);
+        } catch (e) { addToast(`Stop all failed: ${e.message}`, 'error'); }
+    };
+
+    const cardStyle = (running) => ({
+        background: 'var(--surface)',
+        border: `1px solid ${running ? '#388e3c' : 'var(--border)'}`,
+        borderRadius: '10px',
+        padding: '14px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        transition: 'border-color 0.2s',
+    });
+
+    const badgeStyle = (running) => ({
+        fontSize: '0.7rem',
+        fontWeight: 700,
+        padding: '2px 8px',
+        borderRadius: '20px',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+        background: running ? 'rgba(56,142,60,0.18)' : 'rgba(96,125,139,0.15)',
+        color: running ? '#66bb6a' : '#78909c',
+        fontFamily: 'var(--font-mono)',
+    });
+
+    const btnBase = {
+        padding: '4px 11px',
+        borderRadius: '5px',
+        border: 'none',
+        fontSize: '0.72rem',
+        fontWeight: 700,
+        cursor: 'pointer',
+        fontFamily: 'var(--font-ui)',
+        letterSpacing: '0.04em',
+    };
+
+    if (loading) return <div style={{ padding: '40px', color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>Loading Lumio services...</div>;
+
+    return (
+        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', position: 'relative' }}>
+            {/* Toolbar */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontFamily: 'var(--font-ui)', fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>
+                    Lumio Infrastructure — {services.length} services
+                </span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <button style={{ ...btnBase, background: 'var(--surface2)', color: 'var(--text)' }} onClick={loadServices}>Refresh</button>
+                    <button style={{ ...btnBase, background: '#2e7d32', color: '#fff' }} onClick={startAll}>Start All</button>
+                    <button style={{ ...btnBase, background: '#b71c1c', color: '#fff' }} onClick={stopAll}>Stop All</button>
+                </div>
+            </div>
+
+            {/* Error banner */}
+            {error && (
+                <div style={{ background: 'rgba(183,28,28,0.12)', border: '1px solid rgba(183,28,28,0.3)', borderRadius: '8px', padding: '12px 16px', color: '#ef9a9a', fontFamily: 'var(--font-mono)', fontSize: '0.78rem' }}>
+                    ⚠ {error} — is the Debian VM reachable at 192.168.1.62:30766?
+                </div>
+            )}
+
+            {/* Service grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '14px' }}>
+                {services.length === 0 && !error && (
+                    <div style={{ gridColumn: '1/-1', color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', padding: '20px', textAlign: 'center' }}>
+                        No services found. Check services.yaml on Debian.
+                    </div>
+                )}
+                {services.map(s => (
+                    <div key={s.id} style={cardStyle(s.running)}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                            <div>
+                                <div style={{ fontWeight: 600, fontSize: '0.9rem', fontFamily: 'var(--font-ui)' }}>{s.display_name}</div>
+                                {s.description && <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '2px' }}>{s.description}</div>}
+                            </div>
+                            <span style={badgeStyle(s.running)}>{s.running ? '● Running' : '○ Stopped'}</span>
+                        </div>
+                        {s.port && <div style={{ fontSize: '0.72rem', color: '#546e7a', fontFamily: 'var(--font-mono)' }}>port {s.port}</div>}
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            {s.running ? (<>
+                                <button style={{ ...btnBase, background: '#c62828', color: '#fff' }} onClick={() => infraAction(s.id, 'stop')}>Stop</button>
+                                <button style={{ ...btnBase, background: '#e65100', color: '#fff' }} onClick={() => infraAction(s.id, 'restart')}>Restart</button>
+                            </>) : (
+                                <button style={{ ...btnBase, background: '#2e7d32', color: '#fff' }} onClick={() => infraAction(s.id, 'start')}>Start</button>
+                            )}
+                            <button style={{ ...btnBase, background: '#37474f', color: '#b0bec5' }} onClick={() => showLogs(s.id)}>Logs</button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Logs slide-up panel */}
+            {logsPanel && (
+                <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: '42vh', background: '#12141e', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', zIndex: 200 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: '#7986cb' }}>
+                            logs — {logsPanel.serviceId}
+                        </span>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <button style={{ ...btnBase, background: 'var(--surface2)', color: 'var(--muted)' }} onClick={() => showLogs(logsPanel.serviceId)}>Refresh</button>
+                            <button style={{ ...btnBase, background: '#b71c1c', color: '#fff' }} onClick={() => setLogsPanel(null)}>Close</button>
+                        </div>
+                    </div>
+                    <pre style={{ flex: 1, overflowY: 'auto', padding: '10px 16px', fontSize: '0.72rem', color: '#b0bec5', whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'var(--font-mono)' }}>
+                        {logsPanel.loading ? 'Loading...' : logsPanel.logs}
+                    </pre>
+                </div>
+            )}
+        </div>
+    );
+};
+
 const App = () => {
     const [tasks, setTasks] = useState([]);
     const [selectedTaskId, setSelectedTaskId] = useState(null);
@@ -961,6 +1131,7 @@ const App = () => {
                 <button className={activeTab==='rc'        ?'active':''} onClick={() => setActiveTab('rc')}>Research Center</button>
                 <button className={activeTab==='axellog'   ?'active':''} onClick={() => setActiveTab('axellog')}>Axel Log</button>
                 <button className={activeTab==='wolfmed'   ?'active':''} onClick={() => setActiveTab('wolfmed')}>Wolfmed</button>
+                <button className={activeTab==='infra'     ?'active':''} onClick={() => setActiveTab('infra')}>Lumio Infra</button>
                 <button className={activeTab==='help'      ?'active':''} onClick={() => setActiveTab('help')}>Help</button>
             </div>
             {activeTab === 'tasks' && (
@@ -979,6 +1150,7 @@ const App = () => {
             {activeTab === 'rc'        && <div className="main-content"><ResearchCenterPanel addToast={addToast} /></div>}
             {activeTab === 'axellog'   && <div className="main-content" style={{ display:'flex', flexDirection:'column', padding:0 }}><AxelLogPanel /></div>}
             {activeTab === 'wolfmed'   && <div className="main-content" style={{ padding: 0 }}><WolfmedPanel addToast={addToast} /></div>}
+            {activeTab === 'infra'     && <div className="main-content" style={{ padding: 0, overflowY: 'auto' }}><InfraPanel addToast={addToast} /></div>}
             {activeTab === 'help'      && <div className="main-content"><HelpPanel /></div>}
             <Toast toasts={toasts} onRemoveToast={removeToast} />
         </>
