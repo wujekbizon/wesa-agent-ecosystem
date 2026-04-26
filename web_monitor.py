@@ -675,7 +675,17 @@ async def get_wolfmed_book(book: str):
 @app.get("/api/wolfmed/stats")
 async def get_wolfmed_stats():
     manifests = _load_wolfmed_manifests()
-    return {"total_books":len(manifests),"total_chunks":sum(m.get("total_chunks",0) for m in manifests),"validated_chunks":sum(m.get("validated_count",0) for m in manifests),"merged_books":sum(1 for m in manifests if m.get("merge_status")=="done"),"in_progress_books":sum(1 for m in manifests if m.get("merge_status") not in ("done","failed"))}
+    books   = [m for m in manifests if m.get("mode","generate") == "generate"]
+    slides  = [m for m in manifests if m.get("mode","generate") == "generate_slides"]
+    return {
+        "total_books":       len(books),
+        "merged_books":      sum(1 for m in books  if m.get("merge_status") == "done"),
+        "total_chunks":      sum(m.get("total_chunks",0) for m in books),
+        "validated_chunks":  sum(m.get("validated_count",0) for m in books),
+        "total_slides":      len(slides),
+        "merged_slides":     sum(1 for m in slides if m.get("merge_status") == "done"),
+        "in_progress_books": sum(1 for m in manifests if m.get("merge_status") not in ("done","failed")),
+    }
 
 # --- Daemon Control ---
 

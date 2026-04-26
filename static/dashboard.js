@@ -782,37 +782,66 @@ const WolfmedPanel = ({ addToast }) => {
                                 </div>
                             ))}
                         </div>
+                        {(stats.total_slides > 0 || stats.merged_slides > 0) && (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.5rem' }}>
+                                {[
+                                    { label: 'Slides', value: stats.total_slides },
+                                    { label: 'Merged',  value: stats.merged_slides },
+                                ].map(({ label, value }) => (
+                                    <div key={'sl-'+label} style={{ background: 'rgba(180,122,255,0.08)', border: '1px solid rgba(180,122,255,0.2)', borderRadius: '4px', padding: '0.5rem 0.75rem' }}>
+                                        <div style={{ fontSize: '1.1em', fontWeight: 700, fontFamily: 'var(--font-mono)', color: '#b47aff' }}>{value}</div>
+                                        <div style={{ fontSize: '0.65em', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Slides · {label}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
-                <div style={{ fontSize: '0.65em', letterSpacing: '0.12em', color: 'var(--muted)', textTransform: 'uppercase', fontFamily: 'var(--font-ui)', marginBottom: '0.5rem' }}>Books</div>
-                {books.length === 0 && <div style={{ color: 'var(--muted)', fontSize: '0.8em' }}>No books in pipeline yet.</div>}
-                {books.map(book => {
-                    const pct = book.total_chunks > 0 ? Math.round((book.validated_count / book.total_chunks) * 100) : 0;
-                    const isSelected = selectedBook === book.book;
-                    const trimmed = (book.skipped_front || 0) + (book.skipped_back || 0);
-                    return (
-                        <div key={book.book} onClick={() => setSelectedBook(isSelected ? null : book.book)}
-                            style={{ padding: '0.75rem', marginBottom: '0.5rem', background: isSelected ? 'var(--surface2)' : 'transparent', border: isSelected ? '1px solid var(--border)' : '1px solid transparent', borderRadius: '4px', cursor: 'pointer' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-                                <span style={{ fontWeight: 600, fontSize: '0.85em', fontFamily: 'var(--font-ui)', color: 'var(--text)' }}>{book.category}</span>
-                                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                                    {book.auto_trim && <span style={{ fontSize: '0.6em', color: '#4a9eff', fontFamily: 'var(--font-mono)', background: 'rgba(74,158,255,0.12)', padding: '1px 5px', borderRadius: '3px', letterSpacing: '0.06em' }}>AUTO</span>}
-                                    <span style={{ fontSize: '0.7em', color: mergeStatusColor(book.merge_status), fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{book.merge_status}</span>
+                {(() => {
+                    const bookItems  = books.filter(b => b.mode !== 'generate_slides');
+                    const slideItems = books.filter(b => b.mode === 'generate_slides');
+                    const renderItem = (book) => {
+                        const pct = book.total_chunks > 0 ? Math.round((book.validated_count / book.total_chunks) * 100) : 0;
+                        const isSelected = selectedBook === book.book;
+                        const trimmed = (book.skipped_front || 0) + (book.skipped_back || 0);
+                        const isSlide = book.mode === 'generate_slides';
+                        return (
+                            <div key={book.book} onClick={() => setSelectedBook(isSelected ? null : book.book)}
+                                style={{ padding: '0.75rem', marginBottom: '0.5rem', background: isSelected ? 'var(--surface2)' : 'transparent', border: isSelected ? '1px solid var(--border)' : '1px solid transparent', borderRadius: '4px', cursor: 'pointer' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                                    <span style={{ fontWeight: 600, fontSize: '0.85em', fontFamily: 'var(--font-ui)', color: 'var(--text)' }}>{book.book}</span>
+                                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                                        {book.auto_trim && <span style={{ fontSize: '0.6em', color: '#4a9eff', fontFamily: 'var(--font-mono)', background: 'rgba(74,158,255,0.12)', padding: '1px 5px', borderRadius: '3px', letterSpacing: '0.06em' }}>AUTO</span>}
+                                        <span style={{ fontSize: '0.7em', color: mergeStatusColor(book.merge_status), fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{book.merge_status}</span>
+                                    </div>
+                                </div>
+                                <div style={{ height: '4px', background: 'var(--border)', borderRadius: '2px', overflow: 'hidden', marginBottom: '0.3rem' }}>
+                                    <div style={{ height: '100%', width: `${pct}%`, background: book.merge_status === 'done' ? 'var(--done)' : (isSlide ? '#b47aff' : 'var(--in-progress)'), borderRadius: '2px', transition: 'width 0.5s' }} />
+                                </div>
+                                <div style={{ fontSize: '0.7em', color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
+                                    {isSlide
+                                        ? (book.merge_status === 'done' ? 'merged' : (book.validated_count === 1 ? 'validated' : (book.chunk_statuses?.queued ? 'generating...' : (book.chunk_statuses?.validating ? 'validating...' : 'pending'))))
+                                        : <>{book.validated_count}/{book.total_chunks} validated ({pct}%){trimmed > 0 && <span style={{ marginLeft: '0.5rem', color: '#f5a623' }}>· {trimmed}pp skipped</span>}</>
+                                    }
                                 </div>
                             </div>
-                            <div style={{ height: '4px', background: 'var(--border)', borderRadius: '2px', overflow: 'hidden', marginBottom: '0.3rem' }}>
-                                <div style={{ height: '100%', width: `${pct}%`, background: book.merge_status === 'done' ? 'var(--done)' : 'var(--in-progress)', borderRadius: '2px', transition: 'width 0.5s' }} />
-                            </div>
-                            <div style={{ fontSize: '0.7em', color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
-                                {book.validated_count}/{book.total_chunks} validated ({pct}%)
-                                {trimmed > 0 && <span style={{ marginLeft: '0.5rem', color: '#f5a623' }}>· {trimmed}pp skipped</span>}
-                            </div>
-                        </div>
+                        );
+                    };
+                    return (
+                        <>
+                            <div style={{ fontSize: '0.65em', letterSpacing: '0.12em', color: 'var(--muted)', textTransform: 'uppercase', fontFamily: 'var(--font-ui)', marginBottom: '0.5rem' }}>Books</div>
+                            {bookItems.length === 0 && <div style={{ color: 'var(--muted)', fontSize: '0.8em', marginBottom: '1rem' }}>No books in pipeline yet.</div>}
+                            {bookItems.map(renderItem)}
+                            {slideItems.length > 0 && <>
+                                <div style={{ fontSize: '0.65em', letterSpacing: '0.12em', color: '#b47aff', textTransform: 'uppercase', fontFamily: 'var(--font-ui)', marginBottom: '0.5rem', marginTop: '1rem' }}>Lecture Slides</div>
+                                {slideItems.map(renderItem)}
+                            </>}
+                        </>
                     );
-                })}
+                })()}
             </div>
             <div style={{ flex: 1, overflow: 'auto', padding: '1rem' }}>
-                {!selectedBook && <div style={{ color: 'var(--muted)', fontSize: '0.85em', marginTop: '2rem', textAlign: 'center' }}>Select a book to view chunk details</div>}
+                {!selectedBook && <div style={{ color: 'var(--muted)', fontSize: '0.85em', marginTop: '2rem', textAlign: 'center' }}>Select a book or slide file to view details</div>}
                 {selectedBook && detailLoading && <div style={{ color: 'var(--muted)', fontSize: '0.85em' }}>Loading...</div>}
                 {selectedBook && bookDetail && !detailLoading && (
                     <>
@@ -850,6 +879,28 @@ const WolfmedPanel = ({ addToast }) => {
                                 </div>
                             )}
                         </div>
+                        {bookDetail.mode === 'generate_slides' ? (
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: '0.75em' }}>
+                                <thead>
+                                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                                        <th style={{ textAlign: 'left', padding: '0.4rem 0.5rem', color: 'var(--muted)', fontWeight: 600 }}>Source</th>
+                                        <th style={{ textAlign: 'left', padding: '0.4rem 0.5rem', color: 'var(--muted)', fontWeight: 600 }}>Status</th>
+                                        <th style={{ textAlign: 'left', padding: '0.4rem 0.5rem', color: 'var(--muted)', fontWeight: 600 }}>Generate Task</th>
+                                        <th style={{ textAlign: 'left', padding: '0.4rem 0.5rem', color: 'var(--muted)', fontWeight: 600 }}>Validate Task</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(bookDetail.chunks || []).map((chunk, i) => (
+                                        <tr key={chunk.id} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--surface2)' }}>
+                                            <td style={{ padding: '0.4rem 0.5rem', color: '#b47aff' }}>{chunk.txt || chunk.id}</td>
+                                            <td style={{ padding: '0.4rem 0.5rem' }}><span style={{ color: chunkStatusColor(chunk.status), fontWeight: 600 }}>{chunk.status}</span></td>
+                                            <td style={{ padding: '0.4rem 0.5rem', color: 'var(--muted)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chunk.extract_task_id || '—'}</td>
+                                            <td style={{ padding: '0.4rem 0.5rem', color: 'var(--muted)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chunk.validate_task_id || '—'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        ) : (
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: '0.75em' }}>
                             <thead>
                                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
@@ -872,6 +923,7 @@ const WolfmedPanel = ({ addToast }) => {
                                 ))}
                             </tbody>
                         </table>
+                        )}
                     </>
                 )}
             </div>
