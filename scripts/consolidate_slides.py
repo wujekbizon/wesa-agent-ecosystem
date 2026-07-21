@@ -18,18 +18,17 @@ import json
 import os
 import re
 import sqlite3
-import sys
 import uuid as _uuid
 from datetime import datetime
 from pathlib import Path
 
-SCRIPT_DIR    = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent
 ECOSYSTEM_DIR = SCRIPT_DIR.parent
-WESA_DIR      = ECOSYSTEM_DIR.parent
+WESA_DIR = ECOSYSTEM_DIR.parent
 EXTRACTOR_DIR = WESA_DIR / "extractor"
-DONE_DIR      = EXTRACTOR_DIR / "done"
-DATA_DIR      = EXTRACTOR_DIR / "data"
-WOLFMED_DB    = DATA_DIR / "wolfmed.db"
+DONE_DIR = EXTRACTOR_DIR / "done"
+DATA_DIR = EXTRACTOR_DIR / "data"
+WOLFMED_DB = DATA_DIR / "wolfmed.db"
 
 
 def get_db_connection():
@@ -170,7 +169,7 @@ def main():
                     conn.execute(
                         "INSERT OR IGNORE INTO uuid_registry "
                         "(uuid, category, question_hash, registered_at) VALUES (?,?,?,?)",
-                        (uid, category, q_hash, now)
+                        (uid, category, q_hash, now),
                     )
                 added += 1
 
@@ -179,7 +178,9 @@ def main():
             action = "MERGE" if not dry_run else "would merge"
             print(f"  {action} {path.name}: +{added} questions ({skipped} dupes skipped)")
 
-        print(f"  Total: {len(combined)} questions (+{added_total} new, {skipped_total} dupes skipped)")
+        print(
+            f"  Total: {len(combined)} questions (+{added_total} new, {skipped_total} dupes skipped)"
+        )
 
         if not dry_run:
             atomic_write_json(output_path, combined)

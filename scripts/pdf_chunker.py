@@ -38,21 +38,33 @@ except ImportError:
 # These appear on structural pages (ToC, bibliography, copyright, index)
 # ---------------------------------------------------------------------------
 SKIP_KEYWORDS = [
-    "spis treści", "spis rysunków", "spis tabel",
-    "bibliografia", "piśmiennictwo", "wykaz literatury", "literatura",
-    "indeks", "skorowidz",
-    "©", "isbn", "issn", "all rights reserved", "wszelkie prawa",
-    "wydawnictwo", "druk i oprawa",
-    "przedmowa", "wstęp do wydania",    # preface pages — borderline, included in window only
+    "spis treści",
+    "spis rysunków",
+    "spis tabel",
+    "bibliografia",
+    "piśmiennictwo",
+    "wykaz literatury",
+    "literatura",
+    "indeks",
+    "skorowidz",
+    "©",
+    "isbn",
+    "issn",
+    "all rights reserved",
+    "wszelkie prawa",
+    "wydawnictwo",
+    "druk i oprawa",
+    "przedmowa",
+    "wstęp do wydania",  # preface pages — borderline, included in window only
 ]
 
 # A ToC line looks like: "Some Chapter Title ........... 42"
-TOC_LINE_PATTERN = re.compile(r'\.{4,}\s*\d+\s*$')
+TOC_LINE_PATTERN = re.compile(r"\.{4,}\s*\d+\s*$")
 
 
 def sanitize_bookname(name: str) -> str:
     name = name.lower().replace(" ", "_")
-    name = re.sub(r'[^a-z0-9_-]', '', name)
+    name = re.sub(r"[^a-z0-9_-]", "", name)
     return name
 
 
@@ -76,6 +88,7 @@ def extract_text_from_pages(reader: PdfReader, start_idx: int, end_idx: int) -> 
 # Option 2 — Heuristic page scorer
 # ---------------------------------------------------------------------------
 
+
 def score_page(text: str) -> dict:
     """
     Score a single page's text for educational content quality.
@@ -91,14 +104,14 @@ def score_page(text: str) -> dict:
         'reason'          : human-readable explanation of the decision
     """
     chars = len(text.strip())
-    lines = [l for l in text.splitlines() if l.strip()]
+    lines = [line for line in text.splitlines() if line.strip()]
     line_count = len(lines)
     avg_line_len = (chars / line_count) if line_count > 0 else 0
 
-    short_lines = sum(1 for l in lines if len(l.strip()) < 35)
+    short_lines = sum(1 for line in lines if len(line.strip()) < 35)
     short_line_ratio = (short_lines / line_count) if line_count > 0 else 0
 
-    toc_lines = sum(1 for l in lines if TOC_LINE_PATTERN.search(l))
+    toc_lines = sum(1 for line in lines if TOC_LINE_PATTERN.search(line))
 
     text_lower = text.lower()
     keyword_hits = sum(1 for kw in SKIP_KEYWORDS if kw in text_lower)
@@ -112,7 +125,9 @@ def score_page(text: str) -> dict:
         reason = f"table of contents ({toc_lines} ToC-style lines)"
     elif short_line_ratio > 0.72 and chars < 1800:
         is_content = False
-        reason = f"dense short lines ({short_line_ratio:.0%} short, {chars} chars) — likely ToC/index"
+        reason = (
+            f"dense short lines ({short_line_ratio:.0%} short, {chars} chars) — likely ToC/index"
+        )
     elif keyword_hits >= 2:
         is_content = False
         reason = f"structural keywords ({keyword_hits} hits)"
@@ -197,6 +212,7 @@ def detect_content_boundaries(
 # Core chunker
 # ---------------------------------------------------------------------------
 
+
 def chunk_pdf(
     pdf_path: Path,
     category: str,
@@ -237,8 +253,8 @@ def chunk_pdf(
     print(f"Category:    {category}")
 
     # --- Step 1: Static trim ---
-    range_start = skip_start                        # 0-indexed, inclusive
-    range_end = total_pages - skip_end              # 0-indexed, exclusive
+    range_start = skip_start  # 0-indexed, inclusive
+    range_end = total_pages - skip_end  # 0-indexed, exclusive
 
     if range_start >= range_end:
         raise ValueError(
@@ -247,8 +263,10 @@ def chunk_pdf(
         )
 
     if skip_start or skip_end:
-        print(f"Static trim:  pages {range_start + 1}–{range_end} "
-              f"(skipped {skip_start} front, {skip_end} back)")
+        print(
+            f"Static trim:  pages {range_start + 1}–{range_end} "
+            f"(skipped {skip_start} front, {skip_end} back)"
+        )
 
     # --- Step 2: Heuristic trim (auto-trim) ---
     trim_report = None
@@ -268,14 +286,18 @@ def chunk_pdf(
             "content_start_page": first_content + 1,  # 1-indexed for humans
             "content_end_page": last_content + 1,
         }
-        print(f"Auto-trim result: content pages {first_content + 1}–{last_content + 1} "
-              f"(trimmed {skipped_front} front, {skipped_back} back)")
+        print(
+            f"Auto-trim result: content pages {first_content + 1}–{last_content + 1} "
+            f"(trimmed {skipped_front} front, {skipped_back} back)"
+        )
 
     # --- Final range ---
     content_pages = range_end - range_start
     num_chunks = (content_pages + chunk_size - 1) // chunk_size
 
-    print(f"Content range: pages {range_start + 1}–{range_end}  ({content_pages} pages → {num_chunks} chunks)")
+    print(
+        f"Content range: pages {range_start + 1}–{range_end}  ({content_pages} pages → {num_chunks} chunks)"
+    )
     print("-" * 50)
 
     # --- Build manifest ---
@@ -365,6 +387,7 @@ def chunk_pdf(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Split a PDF into fixed-size chunks with intelligent boundary detection.",
@@ -382,22 +405,29 @@ Examples:
   python pdf_chunker.py book.pdf --category anatomia --auto-trim
   python pdf_chunker.py book.pdf --category anatomia --skip-start 5 --auto-trim
   python pdf_chunker.py book.pdf --category anatomia --auto-trim --auto-trim-window 30
-        """
+        """,
     )
 
     parser.add_argument("pdf_path", type=str, help="Path to the source PDF file")
-    parser.add_argument("--category", type=str, required=True,
-                        help="Wolfmed subject category (e.g. 'fizjologia')")
-    parser.add_argument("--chunk-size", type=int, default=10,
-                        help="Pages per chunk (default: 10)")
-    parser.add_argument("--skip-start", type=int, default=0,
-                        help="Unconditionally skip first N pages")
-    parser.add_argument("--skip-end", type=int, default=0,
-                        help="Unconditionally skip last N pages")
-    parser.add_argument("--auto-trim", action="store_true",
-                        help="Heuristically detect and skip non-content pages at boundaries")
-    parser.add_argument("--auto-trim-window", type=int, default=20,
-                        help="Pages to scan at each boundary for auto-trim (default: 20)")
+    parser.add_argument(
+        "--category", type=str, required=True, help="Wolfmed subject category (e.g. 'fizjologia')"
+    )
+    parser.add_argument("--chunk-size", type=int, default=10, help="Pages per chunk (default: 10)")
+    parser.add_argument(
+        "--skip-start", type=int, default=0, help="Unconditionally skip first N pages"
+    )
+    parser.add_argument("--skip-end", type=int, default=0, help="Unconditionally skip last N pages")
+    parser.add_argument(
+        "--auto-trim",
+        action="store_true",
+        help="Heuristically detect and skip non-content pages at boundaries",
+    )
+    parser.add_argument(
+        "--auto-trim-window",
+        type=int,
+        default=20,
+        help="Pages to scan at each boundary for auto-trim (default: 20)",
+    )
 
     args = parser.parse_args()
     pdf_path = Path(args.pdf_path)
@@ -412,8 +442,10 @@ Examples:
             auto_trim=args.auto_trim,
             auto_trim_window=args.auto_trim_window,
         )
-        print(f"\nDone. {manifest['total_chunks']} chunks from {manifest['content_pages']} content pages "
-              f"(of {manifest['total_pages']} total).")
+        print(
+            f"\nDone. {manifest['total_chunks']} chunks from {manifest['content_pages']} content pages "
+            f"(of {manifest['total_pages']} total)."
+        )
     except (FileNotFoundError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

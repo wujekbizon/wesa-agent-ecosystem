@@ -13,13 +13,12 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
-SCRIPT_DIR    = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent
 ECOSYSTEM_DIR = SCRIPT_DIR.parent
-WESA_DIR      = ECOSYSTEM_DIR.parent
-DONE_DIR      = WESA_DIR / "extractor" / "done"
+WESA_DIR = ECOSYSTEM_DIR.parent
+DONE_DIR = WESA_DIR / "extractor" / "done"
 
 
 def load_env():
@@ -34,7 +33,9 @@ def load_env():
             for line in env_path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
                 if line.startswith("NEON_DATABASE_URL=") and not line.startswith("#"):
-                    os.environ["NEON_DATABASE_URL"] = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    os.environ["NEON_DATABASE_URL"] = (
+                        line.split("=", 1)[1].strip().strip('"').strip("'")
+                    )
                     print(f"Loaded NEON_DATABASE_URL from {env_path.name}")
                     return
 
@@ -42,7 +43,9 @@ def load_env():
 def main():
     parser = argparse.ArgumentParser(description="Export wolfmed_tests category to JSON")
     parser.add_argument("category", help="Category value (e.g. badania-fizykalne)")
-    parser.add_argument("--output", help="Output filename in done/ (default: <category>_all_merged.json)")
+    parser.add_argument(
+        "--output", help="Output filename in done/ (default: <category>_all_merged.json)"
+    )
     args = parser.parse_args()
 
     load_env()
@@ -74,13 +77,15 @@ def main():
 
     entries = []
     for row in rows:
-        entries.append({
-            "id": row["id"],
-            "meta": row["meta"],
-            "data": row["data"],
-            "createdAt": row["createdAt"].isoformat() if row["createdAt"] else None,
-            "updatedAt": row["updatedAt"].isoformat() if row["updatedAt"] else None,
-        })
+        entries.append(
+            {
+                "id": row["id"],
+                "meta": row["meta"],
+                "data": row["data"],
+                "createdAt": row["createdAt"].isoformat() if row["createdAt"] else None,
+                "updatedAt": row["updatedAt"].isoformat() if row["updatedAt"] else None,
+            }
+        )
 
     output_name = args.output or f"{args.category}_all_merged.json"
     output_path = DONE_DIR / output_name

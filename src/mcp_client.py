@@ -3,6 +3,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from typing import Any
+
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
@@ -21,7 +22,9 @@ class MCPTool:
 class MCPClient:
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
-        self._thread: threading.Thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._thread: threading.Thread = threading.Thread(
+            target=self._loop.run_forever, daemon=True
+        )
         self._thread.start()
         self._tools: list[MCPTool] = []
         self._server_configs: list[dict] = []
@@ -58,7 +61,9 @@ class MCPClient:
                 tools = await self._discover_from_server(config)
                 all_tools.extend(tools)
             except Exception as e:
-                logger.warning(f"[MCPClient] Failed to discover tools from {config.get('name', 'unknown')}: {e}")
+                logger.warning(
+                    f"[MCPClient] Failed to discover tools from {config.get('name', 'unknown')}: {e}"
+                )
         return all_tools
 
     async def _discover_from_server(self, config: dict) -> list[MCPTool]:
@@ -71,7 +76,9 @@ class MCPClient:
                     MCPTool(
                         name=t.name,
                         description=t.description or "",
-                        input_schema=t.inputSchema if isinstance(t.inputSchema, dict) else (t.inputSchema.model_dump() if t.inputSchema else {}),
+                        input_schema=t.inputSchema
+                        if isinstance(t.inputSchema, dict)
+                        else (t.inputSchema.model_dump() if t.inputSchema else {}),
                         server_name=config["name"],
                         server_url=config["url"],
                     )

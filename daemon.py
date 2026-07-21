@@ -56,6 +56,19 @@ from src.ntfy_commands import dispatch as dispatch_ntfy_command
 from src.task_queue import TaskQueue
 from src.pipeline_controller import PipelineController
 from src.staging_queue import StagingQueue
+from secure_core.control_plane import authorize_ntfy
+from secure_core.vault import redact
+from secure_core import AuditLog
+from src.config import get_config
+from src.logging_setup import configure_logging
+
+_cfg = get_config()
+
+# E0.6: structured JSON logging (logs/structured.jsonl) alongside the
+# existing print()-based AXEL_BRIEFING/AXEL_LOG rendering pipeline, which
+# is left untouched (CLAUDE.md Notification Loop). Migrating individual
+# print() call sites to logger.info(..., extra={...}) is follow-up work.
+configure_logging()
 
 # Directories (relative to cwd - run daemon from agent-ecosystem/)
 TASKS_DIR = Path("tasks")
@@ -65,14 +78,16 @@ LOGS_RESEARCH_DIR = LOGS_DIR / "research"
 LOGS_DEV_DIR = LOGS_DIR / "dev"
 BRIEFING_FILE = LOGS_DIR / "AXEL_BRIEFING.md"
 POLL_INTERVAL = 3
-MAX_WORKERS = int(os.environ.get("DAEMON_MAX_WORKERS", "4"))
-RC_INTERVAL_HOURS = int(os.environ.get("RC_INTERVAL_HOURS", "4"))
+# E0: these were os.environ.get() reads scattered at module scope — now
+# sourced from the single validated WesaConfig (src/config.py).
+MAX_WORKERS = _cfg.daemon_max_workers
+RC_INTERVAL_HOURS = _cfg.rc_interval_hours
 RC_SCHEDULE_FILE = LOGS_DIR / "rc_schedule.json"
 RC_PIPELINE_NAME = "research-center"
 RC_ENABLED_FILE = LOGS_DIR / "rc_enabled.flag"  # exists = enabled, absent = disabled
-SC1_INTERVAL_HOURS = int(os.environ.get("SC1_INTERVAL_HOURS", "2"))
+SC1_INTERVAL_HOURS = _cfg.sc1_interval_hours
 SC1_PIPELINE_NAME = "sc1-scout"
-SY1_INTERVAL_HOURS = int(os.environ.get("SY1_INTERVAL_HOURS", "24"))
+SY1_INTERVAL_HOURS = _cfg.sy1_interval_hours
 SY1_PIPELINE_NAME = "sy1-synthesis"
 SC1_SCHEDULE_FILE = LOGS_DIR / "sc1_schedule.json"
 SY1_SCHEDULE_FILE = LOGS_DIR / "sy1_schedule.json"
@@ -848,6 +863,8 @@ def process_task(task: Task, task_path: Path, router: Router, queue: TaskQueue, 
         
 def make_ntfy_handler(queue: TaskQueue, logs_dir: Path):
     """Return a closure that handles inbound ntfy messages with access to queue and logs_dir."""
+    audit = AuditLog(logs_dir / "AUDIT.jsonl")
+
     def handle_ntfy_message(msg: dict) -> None:
         raw   = (msg.get("message") or "").strip()
         title = (msg.get("title")   or "").strip()
@@ -855,6 +872,21 @@ def make_ntfy_handler(queue: TaskQueue, logs_dir: Path):
         # All daemon-sent bodies are prefixed [daemon], all axel-trigger bodies [axel-trigger]
         if "[daemon]" in raw or "[axel-trigger]" in raw:
             return
+
+        # S0 control-plane lockdown: inbound ntfy commands must be prefixed
+        # with the shared secret (secure_core.control_plane). The topic
+        # itself is public/guessable, so this is the only gate. Unauthorized
+        # messages are logged (redacted) to the audit chain and dropped —
+        # no command dispatch, no task creation.
+        authorized, raw = authorize_ntfy(raw)
+        if not authorized:
+            try:
+                audit.append("ntfy", "unauthorized_message", title=redact(title), body=redact(raw))
+            except Exception:
+                pass
+            log(f"[ntfy] REJECTED unauthorized message (title={title!r})")
+            return
+
         # Try command dispatch first (status, pause, stop, help, approve, retry)
         if dispatch_ntfy_command(raw, queue, logs_dir, notify):
             return

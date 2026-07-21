@@ -6,28 +6,28 @@ The daemon picks it up, processes it, and writes results to logs/.
 
 import json
 import uuid
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime
-from dataclasses import dataclass, asdict, fields
 from enum import Enum
 from pathlib import Path
 
 
 class TaskType(str, Enum):
-    CODE = "code"          # → Ollama (D1 - Python, backend, CLI)
+    CODE = "code"  # → Ollama (D1 - Python, backend, CLI)
     RESEARCH = "research"  # → Gemini (R1 - web research, analysis)
-    WRITE = "write"        # → Gemini (W1 - docs, content, markdown)
-    ANALYZE = "analyze"    # → Gemini
-    GENERAL = "general"    # → Gemini
-    DESIGN = "design"      # → Gemini (UX1 - UI/UX prototypes)
+    WRITE = "write"  # → Gemini (W1 - docs, content, markdown)
+    ANALYZE = "analyze"  # → Gemini
+    GENERAL = "general"  # → Gemini
+    DESIGN = "design"  # → Gemini (UX1 - UI/UX prototypes)
     FRONTEND = "frontend"  # → Gemini (FE1 - React 19, Next.js)
-    TEST = "test"          # → Gemini (T1 - Playwright, testing)
-    REVIEW = "review"      # → Gemini (Q1 - design critic, design reviews only)
+    TEST = "test"  # → Gemini (T1 - Playwright, testing)
+    REVIEW = "review"  # → Gemini (Q1 - design critic, design reviews only)
     CODE_REVIEW = "code_review"  # → Gemini (QA - code QA, logic errors, test generation)
-    ASSETS = "assets"      # → Gemini (A1 - image gen via Nano Banana)
+    ASSETS = "assets"  # → Gemini (A1 - image gen via Nano Banana)
     SKILL_UPDATE = "skill_update"  # → Gemini (SU1 - writes per-run overlay during design loop)
-    SKILL_MERGE = "skill_merge"    # → Gemini (SU1 - permanent merge to ux_agent.yaml on approval)
-    MANAGE = "manage"              # → Gemini (PM1 - project manager, FE1+T1 loop)
-    COORDINATE = "coordinate"      # → Gemini (PM1 - coordination tasks)
+    SKILL_MERGE = "skill_merge"  # → Gemini (SU1 - permanent merge to ux_agent.yaml on approval)
+    MANAGE = "manage"  # → Gemini (PM1 - project manager, FE1+T1 loop)
+    COORDINATE = "coordinate"  # → Gemini (PM1 - coordination tasks)
 
 
 class TaskStatus(str, Enum):
@@ -64,7 +64,6 @@ class Task:
         data = json.loads(path.read_text(encoding="utf-8"))
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in known})
-        
 
     def save(self, path: Path):
         path.write_text(self.to_json(), encoding="utf-8")

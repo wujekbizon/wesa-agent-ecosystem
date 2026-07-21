@@ -1,14 +1,13 @@
-import sys
-from pathlib import Path
 import json
-import time
+import sys
 from datetime import datetime
+from pathlib import Path
 
 # Ensure the root directory is accessible for imports
 root_path = Path(__file__).resolve().parent
 sys.path.insert(0, str(root_path))
 
-import requests
+import requests  # noqa: E402 -- import after sys.path setup is intentional
 
 # --- CONSTANTS ---
 AXEL_MODE_FILE = Path("AXEL_MODE")
@@ -21,8 +20,17 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "qwen3.5:35b"
 MAX_TASKS = 5
 VALID_TYPES = {
-    "code", "research", "write", "design", "review",
-    "test", "skill_update", "assets", "manage", "frontend", "coordinate"
+    "code",
+    "research",
+    "write",
+    "design",
+    "review",
+    "test",
+    "skill_update",
+    "assets",
+    "manage",
+    "frontend",
+    "coordinate",
 }
 
 AXEL_LITE_PROMPT = """\
@@ -79,7 +87,7 @@ def call_qwen(prompt: str) -> str:
         "model": OLLAMA_MODEL,
         "prompt": prompt,
         "stream": False,
-        "options": {"temperature": 0.3}
+        "options": {"temperature": 0.3},
     }
 
     try:
@@ -112,7 +120,7 @@ def parse_tasks(raw: str) -> list[dict]:
     if start == -1 or end == -1 or end <= start:
         raise ValueError(f"No JSON array found in response. Raw: {raw[:200]}")
 
-    array_str = raw[start:end + 1]
+    array_str = raw[start : end + 1]
 
     try:
         tasks = json.loads(array_str)

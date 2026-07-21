@@ -1,0 +1,38 @@
+# secure_core/protected.yaml — Protected File Registry
+#
+# Glob patterns (relative to WORKSPACE_ROOT = agent-ecosystem/, plus a
+# `wesa_root` set for paths under WesaTeam/ but outside agent-ecosystem).
+#
+# Workers (Zone 3) NEVER write to anything matching these patterns —
+# Gate Stage 1 hard-fails (security spec §4.3, §4.6).
+#
+# Worker "edits" to these files arrive only as diff proposals under
+# proposals/<file>/<task-id>.patch for Axel to review and apply.
+#
+# Changes to entries under `secure_core_self` or `manifests` require
+# Greg approval (Zone 0) even for Axel — see spec §4.6.
+
+agent_root_protected:
+  - "CLAUDE.md"
+  - "agents/manifests/**"
+  - "agents/skills/**"
+  - "agents/pipelines/**"
+  - "secure_core/**"
+  - ".git/**"
+  - ".env*"
+  - "logs/AXEL_ORCHESTRATION.yaml"
+  - "logs/AXEL_BRIEFING.md"
+  - "logs/AUDIT.jsonl"
+
+# Files outside agent-ecosystem/ but still within WesaTeam/ that must never
+# be touched by worker output (paths relative to WesaTeam/).
+wesa_root_protected:
+  - "CLAUDE.md"
+  - "_plans/**"
+  - "GREG_PROFILE.md"
+
+# Subsets requiring Greg approval (Zone 0), not just Axel review.
+greg_approval_required:
+  - "secure_core/**"
+  - "agents/manifests/**"
+  - "CLAUDE.md"

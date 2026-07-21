@@ -36,10 +36,7 @@ def _load_manifest(manifest_path: Path) -> dict:
 
 def _save_manifest(manifest_path: Path, manifest: dict):
     manifest["updated_at"] = datetime.now().isoformat()
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False),
-        encoding="utf-8"
-    )
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def scan_outputs_for_chunk(chunk: dict) -> tuple[str | None, str | None]:
@@ -52,7 +49,11 @@ def scan_outputs_for_chunk(chunk: dict) -> tuple[str | None, str | None]:
     validated_path = OUTPUTS_DIR / f"{chunk_id}_validated.json"
 
     raw = str(raw_path) if raw_path.exists() and raw_path.stat().st_size > 10 else None
-    validated = str(validated_path) if validated_path.exists() and validated_path.stat().st_size > 10 else None
+    validated = (
+        str(validated_path)
+        if validated_path.exists() and validated_path.stat().st_size > 10
+        else None
+    )
 
     return raw, validated
 
@@ -110,7 +111,7 @@ def check_manifest(manifest_path: Path, auto_merge: bool = True) -> dict:
             _trigger_merge(manifest_path, manifest)
     elif validated_count + extracted_count == manifest["total_chunks"]:
         # All extracted but not all validated yet
-        print(f"[manifest_checker] All chunks extracted, validation in progress...")
+        print("[manifest_checker] All chunks extracted, validation in progress...")
     else:
         remaining = manifest["total_chunks"] - validated_count - extracted_count
         print(f"[manifest_checker] Still waiting for {remaining} chunks to be extracted")
@@ -180,7 +181,9 @@ def check_all_manifests(auto_merge: bool = True) -> list[dict]:
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Check Wolfmed chunk manifest status and trigger merge")
+    parser = argparse.ArgumentParser(
+        description="Check Wolfmed chunk manifest status and trigger merge"
+    )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--manifest", help="Path to a specific manifest JSON")
     group.add_argument("--check-all", action="store_true", help="Check all pending manifests")

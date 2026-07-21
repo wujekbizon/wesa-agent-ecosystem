@@ -3,15 +3,14 @@ Lumio RAG — Ingestion Pipeline
 PDF → text → chunks → Ollama embeddings → ChromaDB
 """
 
-import os
-import logging
 import hashlib
+import logging
+import os
 from pathlib import Path
-from typing import List
 
 import httpx
-from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pypdf import PdfReader
 
 from .chroma_client import get_or_create_collection
 
@@ -26,7 +25,7 @@ CHUNK_OVERLAP = 50
 # ---------------------------------------------------------------------------
 # Ollama embedding
 # ---------------------------------------------------------------------------
-def embed_texts(texts: List[str]) -> List[List[float]]:
+def embed_texts(texts: list[str]) -> list[list[float]]:
     """Call Ollama /api/embed to get embeddings for a batch of texts."""
     url = f"{OLLAMA_BASE_URL}/api/embed"
     response = httpx.post(
@@ -55,7 +54,7 @@ def extract_text_from_pdf(pdf_path: Path) -> str:
 # ---------------------------------------------------------------------------
 # Chunking
 # ---------------------------------------------------------------------------
-def chunk_text(text: str) -> List[str]:
+def chunk_text(text: str) -> list[str]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
@@ -100,12 +99,14 @@ def ingest_pdf(username: str, pdf_path: Path) -> dict:
         batch = chunks[i : i + batch_size]
         embeddings = embed_texts(batch)
         all_embeddings.extend(embeddings)
-        log.debug(f"[{username}] Embedded batch {i//batch_size + 1}")
+        log.debug(f"[{username}] Embedded batch {i // batch_size + 1}")
 
     # 4. Store in ChromaDB
     collection = get_or_create_collection(username)
     ids = [doc_id(username, filename, i) for i in range(len(chunks))]
-    metadatas = [{"username": username, "source": filename, "chunk_index": i} for i in range(len(chunks))]
+    metadatas = [
+        {"username": username, "source": filename, "chunk_index": i} for i in range(len(chunks))
+    ]
 
     collection.upsert(
         ids=ids,

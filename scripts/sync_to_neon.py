@@ -22,11 +22,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCRIPT_DIR    = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent
 ECOSYSTEM_DIR = SCRIPT_DIR.parent
-WESA_DIR      = ECOSYSTEM_DIR.parent
-DONE_DIR      = WESA_DIR / "extractor" / "done"
-BATCH_SIZE    = 100
+WESA_DIR = ECOSYSTEM_DIR.parent
+DONE_DIR = WESA_DIR / "extractor" / "done"
+BATCH_SIZE = 100
 
 
 def load_env():
@@ -42,7 +42,9 @@ def load_env():
             for line in env_path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
                 if line.startswith("NEON_DATABASE_URL=") and not line.startswith("#"):
-                    os.environ["NEON_DATABASE_URL"] = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    os.environ["NEON_DATABASE_URL"] = (
+                        line.split("=", 1)[1].strip().strip('"').strip("'")
+                    )
                     print(f"Loaded NEON_DATABASE_URL from {env_path.name}")
                     return
 
@@ -64,7 +66,9 @@ def normalize_date(val):
 
 def main():
     parser = argparse.ArgumentParser(description="Sync extractor done/ file to Neon wolfmed_tests")
-    parser.add_argument("filename", help="JSON file in extractor/done/ (e.g. badania-fizykalne_all_merged.json)")
+    parser.add_argument(
+        "filename", help="JSON file in extractor/done/ (e.g. badania-fizykalne_all_merged.json)"
+    )
     parser.add_argument("--dry-run", action="store_true", help="Parse and report without inserting")
     args = parser.parse_args()
 
@@ -76,7 +80,7 @@ def main():
             target = alt
         else:
             print(f"Error: file not found: {target}", file=sys.stderr)
-            print(f"Available files in done/:", file=sys.stderr)
+            print("Available files in done/:", file=sys.stderr)
             for f in sorted(DONE_DIR.glob("*.json")):
                 print(f"  {f.name}", file=sys.stderr)
             sys.exit(1)
@@ -177,7 +181,7 @@ def main():
     cur.close()
     conn.close()
 
-    print(f"\nDone.")
+    print("\nDone.")
     print(f"  Inserted : {inserted}")
     print(f"  Skipped  : {skipped} (already in DB)")
     if errors:

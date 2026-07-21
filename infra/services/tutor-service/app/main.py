@@ -8,12 +8,12 @@ Conversational AI tutor. Pipeline:
   5. Streams response back to UI
 """
 
-import os
 import logging
-from typing import List, AsyncGenerator
+import os
+from collections.abc import AsyncGenerator
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -39,14 +39,14 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # Models
 # ---------------------------------------------------------------------------
 class Message(BaseModel):
-    role: str    # "user" or "assistant"
+    role: str  # "user" or "assistant"
     content: str
 
 
 class ChatRequest(BaseModel):
     username: str
     message: str
-    history: List[Message] = []   # last N turns for context window
+    history: list[Message] = []  # last N turns for context window
     stream: bool = True
 
 
@@ -75,19 +75,23 @@ async def get_rag_context(username: str, question: str) -> str:
 # ---------------------------------------------------------------------------
 # Ollama chat
 # ---------------------------------------------------------------------------
-def build_ollama_messages(context: str, history: List[Message], question: str) -> List[dict]:
+def build_ollama_messages(context: str, history: list[Message], question: str) -> list[dict]:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
     if context:
-        messages.append({
-            "role": "system",
-            "content": f"Here is the relevant context from the student's materials:\n\n{context}"
-        })
+        messages.append(
+            {
+                "role": "system",
+                "content": f"Here is the relevant context from the student's materials:\n\n{context}",
+            }
+        )
     else:
-        messages.append({
-            "role": "system",
-            "content": "No relevant materials found. Let the student know they should upload documents first."
-        })
+        messages.append(
+            {
+                "role": "system",
+                "content": "No relevant materials found. Let the student know they should upload documents first.",
+            }
+        )
 
     # Add conversation history (last 10 turns max)
     for msg in history[-10:]:
@@ -97,7 +101,7 @@ def build_ollama_messages(context: str, history: List[Message], question: str) -
     return messages
 
 
-async def stream_ollama(messages: List[dict]) -> AsyncGenerator[str, None]:
+async def stream_ollama(messages: list[dict]) -> AsyncGenerator[str, None]:
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",
@@ -108,6 +112,7 @@ async def stream_ollama(messages: List[dict]) -> AsyncGenerator[str, None]:
             async for line in response.aiter_lines():
                 if line.strip():
                     import json
+
                     try:
                         data = json.loads(line)
                         token = data.get("message", {}).get("content", "")
@@ -120,7 +125,7 @@ async def stream_ollama(messages: List[dict]) -> AsyncGenerator[str, None]:
                         continue
 
 
-async def call_ollama_sync(messages: List[dict]) -> str:
+async def call_ollama_sync(messages: list[dict]) -> str:
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(
             f"{OLLAMA_BASE_URL}/api/chat",
@@ -178,4 +183,5 @@ async def chat(req: ChatRequest):
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8769)))

@@ -18,20 +18,20 @@ Requirements:
     - NTFY_TOPIC env var set (optional, for bookend notifications)
 """
 
+import logging
 import os
-import sys
 import shutil
 import subprocess
-import logging
-from pathlib import Path
+import sys
 from datetime import datetime
+from pathlib import Path
 
 # --- Paths ---
-SCRIPT_DIR  = Path(__file__).resolve().parent          # agent-ecosystem/
-WESA_DIR    = SCRIPT_DIR.parent                        # WesaTeam/ — where CLAUDE.md lives
-LOGS_DIR    = SCRIPT_DIR / "logs"
-LOG_FILE    = LOGS_DIR / "axel_trigger.log"
-CLAUDE_MD   = WESA_DIR / "CLAUDE.md"
+SCRIPT_DIR = Path(__file__).resolve().parent  # agent-ecosystem/
+WESA_DIR = SCRIPT_DIR.parent  # WesaTeam/ — where CLAUDE.md lives
+LOGS_DIR = SCRIPT_DIR / "logs"
+LOG_FILE = LOGS_DIR / "axel_trigger.log"
+CLAUDE_MD = WESA_DIR / "CLAUDE.md"
 
 # --- Logging ---
 LOGS_DIR.mkdir(exist_ok=True)
@@ -45,6 +45,7 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
 
 # --- Locate claude CLI ---
 def _find_claude() -> str | None:
@@ -96,6 +97,7 @@ DEFAULT_MESSAGE = "Axel, check inbox and proceed autonomously"
 def _send_ntfy(title: str, message: str) -> None:
     """Push a notification to ntfy if NTFY_TOPIC is set."""
     import urllib.request
+
     topic = os.getenv("NTFY_TOPIC", "")
     if not topic:
         return
@@ -125,9 +127,13 @@ def run(message: str = DEFAULT_MESSAGE) -> int:
         return 1
 
     if not CLAUDE_BIN:
-        logger.error("Claude Code CLI not found. Checked PATH and common Windows install locations.")
+        logger.error(
+            "Claude Code CLI not found. Checked PATH and common Windows install locations."
+        )
         logger.error("Tried: AppData/Local/Programs/claude, AppData/Roaming/npm/claude, volta, nvm")
-        logger.error("Fix: run 'where claude' in PowerShell and set CLAUDE_BIN env var, or add its folder to system PATH.")
+        logger.error(
+            "Fix: run 'where claude' in PowerShell and set CLAUDE_BIN env var, or add its folder to system PATH."
+        )
         _send_ntfy("Axel Trigger FAILED", "claude CLI not found — check CLAUDE_BIN or system PATH")
         return 1
 

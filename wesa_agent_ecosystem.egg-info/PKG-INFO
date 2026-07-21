@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: wesa-agent-ecosystem
+Version: 0.5.1
+Summary: WESA agent ecosystem - daemon, dashboard, pipelines, and secure core.
+Requires-Python: >=3.10
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: requests>=2.31.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: rich>=13.0.0
+Requires-Dist: pyyaml>=6.0.0
+Requires-Dist: pypdf>=4.0.0
+Requires-Dist: cryptography>=42.0.0
+Requires-Dist: pydantic-settings>=2.4.0
+Requires-Dist: fastapi>=0.110.0
+Requires-Dist: uvicorn>=0.29.0
+Requires-Dist: mcp>=1.0.0
+Requires-Dist: psycopg[binary]>=3.1
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: ruff>=0.4.0; extra == "dev"
+Requires-Dist: pre-commit>=3.7.0; extra == "dev"
+Requires-Dist: pgserver>=0.1.4; platform_system != "Windows" and extra == "dev"
+Provides-Extra: gemini-legacy
+Requires-Dist: google-genai>=1.0.0; extra == "gemini-legacy"

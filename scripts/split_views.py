@@ -8,8 +8,8 @@ Usage:
     python scripts/split_views.py --project path/to/AgentHire.Intranet
     python scripts/split_views.py --project path/to/AgentHire.PortalWWW
 """
+
 import argparse
-import os
 import re
 from pathlib import Path
 
@@ -17,15 +17,15 @@ from pathlib import Path
 def split_file(src: Path, project_root: Path, dry_run: bool = False) -> int:
     content = src.read_text(encoding="utf-8")
     # Split on // FILE: lines
-    parts = re.split(r'^\s*//\s*FILE:\s*', content, flags=re.MULTILINE)
+    parts = re.split(r"^\s*//\s*FILE:\s*", content, flags=re.MULTILINE)
     if len(parts) <= 1:
         return 0  # nothing to split
 
     written = 0
     for part in parts[1:]:  # skip preamble before first FILE marker
-        lines = part.split('\n')
-        rel_path = lines[0].strip()          # e.g. Views/Agent/Create.cshtml
-        body = '\n'.join(lines[1:]).lstrip('\n')
+        lines = part.split("\n")
+        rel_path = lines[0].strip()  # e.g. Views/Agent/Create.cshtml
+        body = "\n".join(lines[1:]).lstrip("\n")
         dest = project_root / rel_path
         dest.parent.mkdir(parents=True, exist_ok=True)
         if not dry_run:
@@ -57,18 +57,18 @@ def main():
         n = split_file(cshtml, project_root, dry_run=args.dry_run)
         if n > 0 and not args.dry_run:
             # Replace original with just the Index portion (first FILE section)
-            parts = re.split(r'^\s*//\s*FILE:\s*', content, flags=re.MULTILINE)
+            parts = re.split(r"^\s*//\s*FILE:\s*", content, flags=re.MULTILINE)
             # Find the Index section
             index_body = None
             for part in parts[1:]:
-                lines = part.split('\n')
+                lines = part.split("\n")
                 rel = lines[0].strip()
                 if rel.endswith("Index.cshtml"):
-                    index_body = '\n'.join(lines[1:]).lstrip('\n')
+                    index_body = "\n".join(lines[1:]).lstrip("\n")
                     break
             if index_body:
                 cshtml.write_text(index_body, encoding="utf-8")
-                print(f"  Trimmed original to Index only.")
+                print("  Trimmed original to Index only.")
         total += n
 
     print(f"\nDone. {total} view file(s) written.")

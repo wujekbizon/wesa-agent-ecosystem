@@ -13,13 +13,13 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-SCRIPT_DIR   = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent
 ECOSYSTEM_DIR = SCRIPT_DIR.parent
-WESA_DIR     = ECOSYSTEM_DIR.parent
+WESA_DIR = ECOSYSTEM_DIR.parent
 EXTRACTOR_DIR = WESA_DIR / "extractor"
-DONE_DIR     = EXTRACTOR_DIR / "done"
-DATA_DIR     = EXTRACTOR_DIR / "data"
-WOLFMED_DB   = DATA_DIR / "wolfmed.db"
+DONE_DIR = EXTRACTOR_DIR / "done"
+DATA_DIR = EXTRACTOR_DIR / "data"
+WOLFMED_DB = DATA_DIR / "wolfmed.db"
 UUID_REGISTRY_JSON = DATA_DIR / "uuid_registry.json"
 
 
@@ -28,7 +28,7 @@ def main():
 
     # Backup corrupt DB if it exists
     if WOLFMED_DB.exists():
-        backup = DATA_DIR / f"wolfmed_corrupted_{now[:19].replace(':','-')}.db"
+        backup = DATA_DIR / f"wolfmed_corrupted_{now[:19].replace(':', '-')}.db"
         WOLFMED_DB.rename(backup)
         print(f"Backed up corrupt DB -> {backup.name}")
 
@@ -56,7 +56,7 @@ def main():
                 try:
                     conn.execute(
                         "INSERT OR IGNORE INTO uuid_registry VALUES (?,?,?,?)",
-                        (str(u), "legacy", "", now)
+                        (str(u), "legacy", "", now),
                     )
                     registered += 1
                 except Exception:
@@ -70,7 +70,7 @@ def main():
     files_scanned = 0
     for json_file in sorted(DONE_DIR.glob("*.json")):
         try:
-            with open(json_file, "r", encoding="utf-8") as f:
+            with open(json_file, encoding="utf-8") as f:
                 entries = json.load(f)
 
             if not isinstance(entries, list):
@@ -95,7 +95,7 @@ def main():
                 try:
                     conn.execute(
                         "INSERT OR IGNORE INTO uuid_registry VALUES (?,?,?,?)",
-                        (uid, category, q_hash, now)
+                        (uid, category, q_hash, now),
                     )
                     if conn.execute("SELECT changes()").fetchone()[0] > 0:
                         registered += 1

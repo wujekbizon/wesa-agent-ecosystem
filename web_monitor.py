@@ -23,10 +23,19 @@ sys.path.insert(0, str(BASE_DIR))
 
 from src.task_queue import TaskQueue
 from src.staging_queue import StagingQueue
+from secure_core.control_plane import verify_dashboard_token
+from src.config import get_config
+from src.logging_setup import configure_logging
+
+_cfg = get_config()
+
+# E0.6: structured JSON logging (logs/structured.jsonl), additive alongside
+# existing dashboard behavior. See daemon.py for the same setup + rationale.
+configure_logging()
 
 # --- Configuration ---
 PORT = 8765
-LUMIO_INFRA_MANAGER_URL = os.environ.get("LUMIO_INFRA_MANAGER_URL", "http://192.168.1.62:30766")
+LUMIO_INFRA_MANAGER_URL = _cfg.lumio_infra_manager_url
 DB_PATH = BASE_DIR / "logs" / "tasks.db"
 LOGS_DIR = BASE_DIR / "logs"
 LOGS_DESIGNS_DIR = LOGS_DIR / "designs"
@@ -65,6 +74,20 @@ app = FastAPI(
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/designs", StaticFiles(directory=str(DESIGNS_DIR)), name="designs")
+
+# --- S0 control-plane lockdown ---
+# All mutating requests (POST/DELETE) require a bearer token matching the
+# vault-stored DASHBOARD_TOKEN (secure_core.control_plane). GETs remain
+# open for local dashboard viewing. Run `python -m secure_core.control_plane`
+# once to provision the token, then add it as an Authorization: Bearer
+# header in the dashboard UI / browser bookmark.
+@app.middleware("http")
+async def require_dashboard_token(request: Request, call_next):
+    if request.method in ("POST", "DELETE"):
+        auth = request.headers.get("authorization")
+        if not verify_dashboard_token(auth):
+            return JSONResponse(status_code=401, content={"detail": "unauthorized"})
+    return await call_next(request)
 
 # --- Dashboard ---
 
@@ -891,4 +914,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("web_monitor:app", host="0.0.0.0", port=PORT, reload=False, log_level="info")
+    # S0: bind to localhost only — dashboard was previously exposed on all
+    # interfaces with zero auth. Remote access (if ever needed) goes through
+    # an authenticated tunnel, not a raw 0.0.0.0 bind.
+    uvicorn.run("web_monitor:app", host="127.0.0.1", port=PORT, reload=False, log_level="info")

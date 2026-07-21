@@ -4,17 +4,17 @@ FastAPI wrapper around ingestion + query modules.
 Called by tutor-service and ui-service.
 """
 
-import os
 import logging
+import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .ingestion import ingest_pdf, delete_document
-from .query import query_user_collection, get_user_documents
-from .chroma_client import list_collections, delete_collection
+from .chroma_client import delete_collection, list_collections
+from .ingestion import delete_document, ingest_pdf
+from .query import get_user_documents, query_user_collection
 
 log = logging.getLogger("rag.api")
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
@@ -28,7 +28,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 class IngestRequest(BaseModel):
     username: str
-    filename: str   # must exist at /home/{username}/materials/{filename}
+    filename: str  # must exist at /home/{username}/materials/{filename}
 
 
 class QueryRequest(BaseModel):
@@ -60,8 +60,7 @@ async def ingest(req: IngestRequest, background_tasks: BackgroundTasks):
     pdf_path = STORAGE_BASE / req.username / MATERIALS_SUBDIR / req.filename
     if not pdf_path.exists():
         raise HTTPException(
-            status_code=404,
-            detail=f"File not found: {pdf_path}. Upload via storage-service first."
+            status_code=404, detail=f"File not found: {pdf_path}. Upload via storage-service first."
         )
 
     def run_ingestion():
@@ -127,4 +126,5 @@ def remove_collection(username: str):
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8768)))

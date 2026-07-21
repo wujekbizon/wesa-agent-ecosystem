@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,gemini-legacy]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Format check (ruff)
+        run: ruff format --check .
+
+      - name: Unit tests (pytest)
+        env:
+          # E0: no live API calls in CI. Config object falls back to safe
+          # defaults; secure_core tests use isolated tmp_path vaults.
+          WESA_ENV: "test"
+          WESA_VAULT_BACKEND: "fernet"
+        run: pytest -q

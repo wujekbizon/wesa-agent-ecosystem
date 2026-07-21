@@ -1,11 +1,12 @@
-import os
 import json
+import os
 import subprocess
 from pathlib import Path
+
+import uvicorn
 from mcp.server.fastmcp import FastMCP
 from starlette.responses import JSONResponse
 from starlette.routing import Route
-import uvicorn
 
 # Load configuration at module startup
 CONFIG_PATH = os.getenv("SHELL_CONFIG_PATH", "/app/config.json")
@@ -13,10 +14,11 @@ ALLOWLIST: list[str] = ["echo"]
 TIMEOUT_SECONDS: int = 30
 WORKSPACE_ROOT: str = "/workspace"
 
+
 def load_config() -> None:
     global ALLOWLIST, TIMEOUT_SECONDS, WORKSPACE_ROOT
     try:
-        with open(CONFIG_PATH, "r") as f:
+        with open(CONFIG_PATH) as f:
             config = json.load(f)
         ALLOWLIST = config.get("allowlist", ["echo"])
         TIMEOUT_SECONDS = config.get("timeout_seconds", 30)
@@ -24,17 +26,19 @@ def load_config() -> None:
     except FileNotFoundError:
         pass  # Use safe defaults
 
+
 load_config()
 
 # Initialize FastMCP
 mcp = FastMCP("shell-server")
+
 
 @mcp.tool()
 def run_command(command: str, args: list[str], cwd: str = "/workspace") -> str:
     # Security check a: command must be in allowlist
     if command not in ALLOWLIST:
         raise ValueError(f"Command not allowed: {command}")
-    
+
     # Security check b: cwd must be under /workspace
     cwd_path = Path(cwd).resolve()
     workspace_path = Path(WORKSPACE_ROOT).resolve()
@@ -42,26 +46,23 @@ def run_command(command: str, args: list[str], cwd: str = "/workspace") -> str:
         cwd_path.relative_to(workspace_path)
     except ValueError:
         raise ValueError(f"cwd must be under /workspace, got: {cwd}")
-    
+
     # Security check c: no argument may contain 'sudo'
     for arg in args:
         if "sudo" in arg:
             raise ValueError("sudo not permitted")
-    
+
     # Execute command
     try:
         result = subprocess.run(
-            [command] + args,
-            capture_output=True,
-            text=True,
-            timeout=TIMEOUT_SECONDS,
-            cwd=cwd
+            [command] + args, capture_output=True, text=True, timeout=TIMEOUT_SECONDS, cwd=cwd
         )
         return f"exit_code: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     except subprocess.TimeoutExpired:
         return "exit_code: -1\nstdout:\n\nstderr:\nCommand timed out"
     except Exception as e:
         return f"exit_code: -1\nstdout:\n\nstderr:\n{str(e)}"
+
 
 @mcp.tool()
 def get_allowlist() -> str:

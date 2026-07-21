@@ -1,11 +1,12 @@
+import glob
 import json
 import re
-import yaml
-import glob
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-from src.task import Task, TaskType, TaskStatus
+
+import yaml
+
+from src.task import Task, TaskType
 from src.task_queue import TaskQueue
 
 
@@ -15,7 +16,7 @@ class PipelineController:
         pipelines_dir: str,
         tasks_dir: str,
         workspace_root: str,
-        staging_queue=None,   # optional StagingQueue instance
+        staging_queue=None,  # optional StagingQueue instance
     ):
         self.pipelines_dir = Path(pipelines_dir)
         self.tasks_dir = Path(tasks_dir)
@@ -37,7 +38,7 @@ class PipelineController:
             if self.running_dir in Path(file_path).parents:
                 continue
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, encoding="utf-8") as f:
                     pipeline_def = yaml.safe_load(f)
                 if pipeline_def and isinstance(pipeline_def.get("stages"), list):
                     self._pipelines[pipeline_def["name"]] = pipeline_def
@@ -79,13 +80,13 @@ class PipelineController:
 
         return run_id
 
-    def on_task_complete(self, task_id: str, result: str, queue: TaskQueue) -> Optional[dict]:
+    def on_task_complete(self, task_id: str, result: str, queue: TaskQueue) -> dict | None:
         """Call this from daemon after every task completion.
         Returns a completion dict if a pipeline just finished (and notify_on_complete is True),
         otherwise returns None."""
         for state_file in list(self.running_dir.glob("*.json")):
             try:
-                with open(state_file, "r", encoding="utf-8") as f:
+                with open(state_file, encoding="utf-8") as f:
                     state = json.load(f)
             except (json.JSONDecodeError, FileNotFoundError):
                 continue
@@ -98,7 +99,7 @@ class PipelineController:
     # Internal
     # ------------------------------------------------------------------
 
-    def _advance(self, state_file: Path, state: dict, result: str, queue: TaskQueue) -> Optional[dict]:
+    def _advance(self, state_file: Path, state: dict, result: str, queue: TaskQueue) -> dict | None:
         """Advance the pipeline one step. Returns completion dict if pipeline just finished
         and notify_on_complete is True, otherwise None."""
         pipeline_name = state["pipeline"]
@@ -136,7 +137,7 @@ class PipelineController:
         # Evaluate stop condition
         stop_cond_met = self._eval_stop_if(current_stage.get("stop_if", ""), result, state)
 
-        loop_to_id: Optional[str] = current_stage.get("loop_to")
+        loop_to_id: str | None = current_stage.get("loop_to")
         max_iter: int = pipeline_def.get("max_iterations", 10)
 
         if loop_to_id and not stop_cond_met:
@@ -145,11 +146,11 @@ class PipelineController:
             if state["iteration"] > max_iter:
                 return self._complete(state_file, state, pipeline_def, "max_iterations_reached")
 
-            target_idx = next(
-                (i for i, s in enumerate(stages) if s.get("id") == loop_to_id), -1
-            )
+            target_idx = next((i for i, s in enumerate(stages) if s.get("id") == loop_to_id), -1)
             if target_idx == -1:
-                return self._complete(state_file, state, pipeline_def, "error_loop_target_not_found")
+                return self._complete(
+                    state_file, state, pipeline_def, "error_loop_target_not_found"
+                )
 
             state["current_stage_index"] = target_idx
             self._save_state(state_file, state)
@@ -172,7 +173,9 @@ class PipelineController:
         self._save_state(state_file, state)
         return None
 
-    def _queue_rt1_task(self, state: dict, brief_content: str, stages: list, queue: TaskQueue) -> None:
+    def _queue_rt1_task(
+        self, state: dict, brief_content: str, stages: list, queue: TaskQueue
+    ) -> None:
         """
         Queue an RT1 routing task after W1 synthesis completes.
         The task carries _rt1_meta so the daemon can dispatch it without
@@ -203,14 +206,13 @@ class PipelineController:
         }
 
         task_file = self.tasks_dir / f"{rt1_task_id}.json"
-        task_file.write_text(
-            json.dumps(rt1_task, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        task_file.write_text(json.dumps(rt1_task, indent=2, ensure_ascii=False), encoding="utf-8")
         queue.import_task(rt1_task)
 
         # Mark topic complete in rc_queue
         try:
-            from src.rc_queue_manager import load_queue, save_queue, complete_topic
+            from src.rc_queue_manager import complete_topic, load_queue, save_queue
+
             rc_queue = load_queue()
             for t in rc_queue.get("in_progress", []):
                 if t.get("title", "").lower() == topic.lower():
@@ -220,7 +222,9 @@ class PipelineController:
         except Exception as e:
             print(f"[PipelineController] rc_queue complete_topic failed: {e}")
 
-    def _complete(self, state_file: Path, state: dict, pipeline_def: dict, stop_reason: str) -> Optional[dict]:
+    def _complete(
+        self, state_file: Path, state: dict, pipeline_def: dict, stop_reason: str
+    ) -> dict | None:
         """Mark pipeline done and return notification dict if notify_on_complete is set."""
         self._mark_done(state_file, state, stop_reason)
         if pipeline_def.get("notify_on_complete"):
@@ -264,11 +268,11 @@ class PipelineController:
             return False
         op = parts[1]
         return (
-            (op == ">=" and score >= threshold) or
-            (op == ">" and score > threshold) or
-            (op == "<=" and score <= threshold) or
-            (op == "<" and score < threshold) or
-            (op == "==" and score == threshold)
+            (op == ">=" and score >= threshold)
+            or (op == ">" and score > threshold)
+            or (op == "<=" and score <= threshold)
+            or (op == "<" and score < threshold)
+            or (op == "==" and score == threshold)
         )
 
     def _queue_stage(
@@ -276,8 +280,7 @@ class PipelineController:
     ) -> str:
         template = stage.get("prompt_template", "")
         prompt = (
-            template
-            .replace("{prev_output}", prev_output)
+            template.replace("{prev_output}", prev_output)
             .replace("{run_id}", state["run_id"])
             .replace("{topic}", state.get("topic", ""))
             .replace("{iteration}", str(state.get("iteration", 1)))
@@ -319,7 +322,27 @@ class PipelineController:
 
         task_file = self.tasks_dir / f"{task.id}.json"
         task_file.write_text(
-            json.dumps({
+            json.dumps(
+                {
+                    "id": task.id,
+                    "type": task_type.value,
+                    "prompt": prompt,
+                    "output_file": output_file,
+                    "status": "pending",
+                    "created_at": datetime.now().isoformat(),
+                    "result": "",
+                    "error": "",
+                    "model_used": "",
+                    "completed_at": "",
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        queue.import_task(
+            {
                 "id": task.id,
                 "type": task_type.value,
                 "prompt": prompt,
@@ -330,22 +353,8 @@ class PipelineController:
                 "error": "",
                 "model_used": "",
                 "completed_at": "",
-            }, indent=2, ensure_ascii=False),
-            encoding="utf-8",
+            }
         )
-
-        queue.import_task({
-            "id": task.id,
-            "type": task_type.value,
-            "prompt": prompt,
-            "output_file": output_file,
-            "status": "pending",
-            "created_at": datetime.now().isoformat(),
-            "result": "",
-            "error": "",
-            "model_used": "",
-            "completed_at": "",
-        })
         return task.id
 
     def _save_state(self, state_file: Path, state: dict) -> None:
@@ -356,4 +365,6 @@ class PipelineController:
         state["stop_reason"] = stop_reason
         state["ended_at"] = datetime.now().isoformat()
         self._save_state(state_file, state)
-        print(f"[PipelineController] Pipeline '{state['pipeline']}' run '{state['run_id']}' done — {stop_reason}.")
+        print(
+            f"[PipelineController] Pipeline '{state['pipeline']}' run '{state['run_id']}' done — {stop_reason}."
+        )

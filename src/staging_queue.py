@@ -1,13 +1,13 @@
+import os
 import sqlite3
 import uuid
-import os
 from datetime import datetime
-from typing import Optional
 
 DB_DEFAULT_PATH = "logs/staging.db"
 
+
 class StagingQueue:
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         self.db_path = db_path or DB_DEFAULT_PATH
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
@@ -34,7 +34,9 @@ class StagingQueue:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def add_brief(self, topic: str, brief_content: str, raw_research: str = "", source_pipeline: str = "") -> str:
+    def add_brief(
+        self, topic: str, brief_content: str, raw_research: str = "", source_pipeline: str = ""
+    ) -> str:
         now = datetime.utcnow().isoformat()
         # ID format: YYYY-MM-DD-<hex8>
         date_part = now[:10]
@@ -46,10 +48,23 @@ class StagingQueue:
         axel_notes = None
 
         with self._get_connection() as conn:
-            cursor = conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO staging_tasks (id, topic, source_pipeline, brief_content, raw_research, status, axel_notes, created_at, reviewed_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (brief_id, topic, source_pipeline, brief_content, raw_research, status, axel_notes, now, reviewed_at))
+            """,
+                (
+                    brief_id,
+                    topic,
+                    source_pipeline,
+                    brief_content,
+                    raw_research,
+                    status,
+                    axel_notes,
+                    now,
+                    reviewed_at,
+                ),
+            )
             conn.commit()
 
         return brief_id
@@ -64,7 +79,7 @@ class StagingQueue:
         return [dict(row) for row in rows]
 
     def review(self, brief_id: str, decision: str, axel_notes: str = "") -> None:
-        if decision not in ('approved', 'discarded', 'resend'):
+        if decision not in ("approved", "discarded", "resend"):
             raise ValueError(f"Unknown decision: {decision}")
 
         reviewed_at = datetime.utcnow().isoformat()
@@ -75,11 +90,14 @@ class StagingQueue:
             if not cursor.fetchone():
                 raise ValueError(f"Unknown brief ID: {brief_id}")
 
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE staging_tasks
                 SET status = ?, axel_notes = ?, reviewed_at = ?
                 WHERE id = ?
-            """, (decision, axel_notes, reviewed_at, brief_id))
+            """,
+                (decision, axel_notes, reviewed_at, brief_id),
+            )
             conn.commit()
 
     def get_all(self) -> list[dict]:
@@ -91,7 +109,7 @@ class StagingQueue:
         return [dict(row) for row in rows]
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import tempfile
 
     # Create a temporary DB for smoke test
@@ -119,7 +137,7 @@ if __name__ == '__main__':
 
         # Get all
         all_items = queue.get_all()
-        print(f"All items (newest first):")
+        print("All items (newest first):")
         for item in all_items:
             print(f"  - {item['id']}: status={item['status']}")
 

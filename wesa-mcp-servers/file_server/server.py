@@ -1,10 +1,11 @@
-import os
 import glob
+import os
 from pathlib import Path
+
+import uvicorn
 from mcp.server.fastmcp import FastMCP
 from starlette.responses import JSONResponse
 from starlette.routing import Route
-import uvicorn
 
 FILE_SERVER_ROOT = os.getenv("FILE_SERVER_ROOT", "/workspace")
 RESOLVED_ROOT = Path(FILE_SERVER_ROOT).resolve()

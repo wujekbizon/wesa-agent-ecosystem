@@ -3,8 +3,10 @@ WESA Agent Ecosystem - Tool Layer
 Resolves MCP server configs for a given agent.
 Reads agent config dict, health-checks declared servers, returns reachable server list.
 """
+
 import logging
 import os
+
 import requests
 
 logger = logging.getLogger(__name__)
@@ -13,8 +15,8 @@ logger = logging.getLogger(__name__)
 # URL can be overridden per-server via environment variables:
 #   WESA_FILE_SERVER_URL, WESA_SHELL_SERVER_URL, WESA_BROWSER_SERVER_URL
 SERVER_REGISTRY: dict[str, dict] = {
-    "file_server":    {"url": os.getenv("WESA_FILE_SERVER_URL",    "http://localhost:8001")},
-    "shell_server":   {"url": os.getenv("WESA_SHELL_SERVER_URL",   "http://localhost:8002")},
+    "file_server": {"url": os.getenv("WESA_FILE_SERVER_URL", "http://localhost:8001")},
+    "shell_server": {"url": os.getenv("WESA_SHELL_SERVER_URL", "http://localhost:8002")},
     "browser_server": {"url": os.getenv("WESA_BROWSER_SERVER_URL", "http://localhost:8003")},
 }
 

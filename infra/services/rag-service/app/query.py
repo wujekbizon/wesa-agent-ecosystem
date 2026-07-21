@@ -4,9 +4,8 @@ Semantic search against a user's ChromaDB collection.
 Returns top-k chunks + metadata.
 """
 
-import os
 import logging
-from typing import List
+import os
 
 import httpx
 
@@ -19,7 +18,7 @@ EMBEDDING_MODEL = os.environ.get("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
 DEFAULT_TOP_K = 5
 
 
-def embed_query(text: str) -> List[float]:
+def embed_query(text: str) -> list[float]:
     url = f"{OLLAMA_BASE_URL}/api/embed"
     response = httpx.post(
         url,
@@ -57,17 +56,17 @@ def query_user_collection(username: str, question: str, top_k: int = DEFAULT_TOP
 
     chunks = []
     for i, doc in enumerate(results["documents"][0]):
-        chunks.append({
-            "text": doc,
-            "source": results["metadatas"][0][i].get("source", "unknown"),
-            "chunk_index": results["metadatas"][0][i].get("chunk_index", 0),
-            "relevance_score": round(1 - results["distances"][0][i], 4),  # cosine → similarity
-        })
+        chunks.append(
+            {
+                "text": doc,
+                "source": results["metadatas"][0][i].get("source", "unknown"),
+                "chunk_index": results["metadatas"][0][i].get("chunk_index", 0),
+                "relevance_score": round(1 - results["distances"][0][i], 4),  # cosine → similarity
+            }
+        )
 
     # Build context string for LLM prompt
-    context = "\n\n---\n\n".join(
-        f"[Source: {c['source']}]\n{c['text']}" for c in chunks
-    )
+    context = "\n\n---\n\n".join(f"[Source: {c['source']}]\n{c['text']}" for c in chunks)
 
     return {
         "username": username,
@@ -77,7 +76,7 @@ def query_user_collection(username: str, question: str, top_k: int = DEFAULT_TOP
     }
 
 
-def get_user_documents(username: str) -> List[str]:
+def get_user_documents(username: str) -> list[str]:
     """List unique document names in the user's collection."""
     collection = get_or_create_collection(username)
     if collection.count() == 0:

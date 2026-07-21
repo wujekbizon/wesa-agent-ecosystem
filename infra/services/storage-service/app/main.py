@@ -5,15 +5,13 @@ Materials stored at: /home/{username}/materials/
 """
 
 import os
-import shutil
-from pathlib import Path
 from datetime import datetime
-from typing import List
+from pathlib import Path
 
 import aiofiles
 import bcrypt
 import yaml
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -116,12 +114,14 @@ def list_files(username: str):
     for f in sorted(folder.iterdir()):
         if f.is_file():
             stat = f.stat()
-            files.append({
-                "name": f.name,
-                "size_bytes": stat.st_size,
-                "uploaded_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                "path": str(f),
-            })
+            files.append(
+                {
+                    "name": f.name,
+                    "size_bytes": stat.st_size,
+                    "uploaded_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "path": str(f),
+                }
+            )
     return {"username": username, "files": files, "count": len(files)}
 
 
@@ -144,7 +144,7 @@ async def upload_file(username: str, file: UploadFile = File(...)):
         "filename": file.filename,
         "size_bytes": len(content),
         "path": str(dest),
-        "trigger_ingestion": True,   # rag-service should be notified after upload
+        "trigger_ingestion": True,  # rag-service should be notified after upload
     }
 
 
@@ -184,4 +184,5 @@ def download_file(username: str, filename: str):
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8767)))

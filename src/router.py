@@ -54,6 +54,20 @@ class Router:
                 ollama_options=skill.ollama_options or None,
             )
         else:
+            # Handles model == 'gemini' (13 of 14 skill YAMLs) and any other
+            # model string that isn't 'ollama'.
+            #
+            # E0.3 fail-fast guard lived here 2026-06-13 -> 2026-06-20: Google
+            # API credit had expired and this branch raised RuntimeError
+            # instead of letting GeminiAgent() fail with an unhelpful auth
+            # error or get caught in the daemon's retry/backoff (the "17
+            # tasks failed one by one over hours" incident that motivated F1).
+            # Removed 2026-06-20: Greg provisioned a new GOOGLE_API_KEY
+            # (3-month free trial, expires 2026-09-20) — see .env and
+            # AXEL_ORCHESTRATION.yaml hard_deadlines. If the key goes dead
+            # again before the E1 provider abstraction lands, restore the
+            # explicit `elif skill.model == 'gemini': raise RuntimeError(...)`
+            # branch (see git history / AXEL_LOG 2026-06-13 entry).
             if use_web_search:
                 self._agents[skill.name] = GeminiAgent.with_search(
                     system_prompt=skill.system_prompt,

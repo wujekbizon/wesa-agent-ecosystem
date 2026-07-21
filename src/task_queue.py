@@ -4,11 +4,11 @@ Replaces the file-based JSON queue with a persistent SQLite backend.
 Single-process safe. Use output_file field in tasks for direct file deployment.
 """
 
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
-import os
+from typing import Any
 
 DB_PATH = os.getenv("WESA_TASK_DB", "data/tasks.db")
 VALID_STATUSES = {"pending", "in_progress", "done", "failed"}
@@ -47,7 +47,7 @@ class TaskQueue:
     Supports add, fetch, update, and list operations.
     """
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         self._db_path = db_path or DB_PATH
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
         self._ensure_schema()
@@ -61,7 +61,7 @@ class TaskQueue:
         with self._get_conn() as conn:
             init_db(conn)
 
-    def add_task(self, task: Dict[str, Any]) -> str:
+    def add_task(self, task: dict[str, Any]) -> str:
         """
         Adds a new task with status 'pending'.
 
@@ -71,7 +71,7 @@ class TaskQueue:
         Returns:
             str: The generated unique task ID (YYYY-MM-DD_<hex8>).
         """
-        if 'type' not in task or 'prompt' not in task:
+        if "type" not in task or "prompt" not in task:
             raise ValueError("Task must contain 'type' and 'prompt'.")
 
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -86,12 +86,12 @@ class TaskQueue:
                 """,
                 (
                     task_id,
-                    task['type'],
-                    task['prompt'],
-                    task.get('model'),
-                    task.get('output_file'),
+                    task["type"],
+                    task["prompt"],
+                    task.get("model"),
+                    task.get("output_file"),
                     now_iso,
-                )
+                ),
             )
             conn.commit()
             return task_id
@@ -101,7 +101,7 @@ class TaskQueue:
         finally:
             conn.close()
 
-    def get_next_pending(self) -> Optional[Dict[str, Any]]:
+    def get_next_pending(self) -> dict[str, Any] | None:
         """Retrieves the oldest pending task. Caller must immediately update status to in_progress."""
         conn = self._get_conn()
         try:
@@ -149,7 +149,7 @@ class TaskQueue:
                     task_data.get("completed_at"),
                     task_data.get("result"),
                     task_data.get("error"),
-                )
+                ),
             )
             conn.commit()
         except sqlite3.IntegrityError:
@@ -158,8 +158,7 @@ class TaskQueue:
             conn.close()
 
     def update_status(
-        self, task_id: str, status: str,
-        result: str = '', error: str = '', model_used: str = ''
+        self, task_id: str, status: str, result: str = "", error: str = "", model_used: str = ""
     ) -> None:
         """
         Updates task status and optional result/error/model.
@@ -174,7 +173,9 @@ class TaskQueue:
         if status not in VALID_STATUSES:
             raise ValueError(f"Invalid status '{status}'. Must be one of {VALID_STATUSES}")
 
-        completed_at = datetime.now(timezone.utc).isoformat() if status in ('done', 'failed') else None
+        completed_at = (
+            datetime.now(timezone.utc).isoformat() if status in ("done", "failed") else None
+        )
 
         conn = self._get_conn()
         try:
@@ -185,7 +186,7 @@ class TaskQueue:
                     model = COALESCE(NULLIF(?, ''), model)
                 WHERE id = ?
                 """,
-                (status, result, error, completed_at, model_used, task_id)
+                (status, result, error, completed_at, model_used, task_id),
             )
             if cursor.rowcount == 0:
                 raise ValueError(f"Task '{task_id}' not found.")
@@ -193,7 +194,7 @@ class TaskQueue:
         finally:
             conn.close()
 
-    def get_all(self) -> List[Dict[str, Any]]:
+    def get_all(self) -> list[dict[str, Any]]:
         """Returns all tasks ordered by creation time (newest first)."""
         conn = self._get_conn()
         try:
@@ -203,23 +204,26 @@ class TaskQueue:
             conn.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import tempfile
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         tmp_db = f.name
 
     queue = TaskQueue(db_path=tmp_db)
 
     id1 = queue.add_task({"type": "code", "prompt": "Write a hello world function"})
-    id2 = queue.add_task({"type": "research", "prompt": "Research LlamaIndex", "output_file": "src/test.py"})
+    id2 = queue.add_task(
+        {"type": "research", "prompt": "Research LlamaIndex", "output_file": "src/test.py"}
+    )
 
     print(f"Added: {id1}, {id2}")
 
     next_task = queue.get_next_pending()
     print(f"Next pending: {next_task['id']} [{next_task['type']}]")
 
-    queue.update_status(next_task['id'], 'in_progress')
-    queue.update_status(next_task['id'], 'done', result="def hello(): return 'world'")
+    queue.update_status(next_task["id"], "in_progress")
+    queue.update_status(next_task["id"], "done", result="def hello(): return 'world'")
 
     for t in queue.get_all():
         print(f"  {t['id']} | {t['status']} | output_file={t['output_file']}")

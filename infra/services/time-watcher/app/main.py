@@ -6,14 +6,13 @@ Future: enforce limits, send notifications to Greg.
 Data stored as JSON per user in /data/sessions/{username}.json
 """
 
-import os
 import json
 import logging
+import os
+from datetime import date, datetime
 from pathlib import Path
-from datetime import datetime, date
-from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -73,7 +72,11 @@ def start_session(req: SessionStartRequest):
         return {"status": "already_active", "started_at": data["active_session"]["started_at"]}
     data["active_session"] = {"started_at": datetime.utcnow().isoformat()}
     save_user_data(req.username, data)
-    return {"status": "started", "username": req.username, "started_at": data["active_session"]["started_at"]}
+    return {
+        "status": "started",
+        "username": req.username,
+        "started_at": data["active_session"]["started_at"],
+    }
 
 
 @app.post("/session/end")
@@ -122,7 +125,9 @@ def get_stats(username: str, days: int = 7):
             continue
         delta = (today - d).days
         if delta <= days:
-            daily_totals[session_date] = daily_totals.get(session_date, 0) + s.get("duration_minutes", 0)
+            daily_totals[session_date] = daily_totals.get(session_date, 0) + s.get(
+                "duration_minutes", 0
+            )
 
     return {
         "username": username,
@@ -143,16 +148,16 @@ def get_all_stats():
         sessions = data.get("sessions", [])
         today = date.today().isoformat()
         today_minutes = sum(
-            s.get("duration_minutes", 0)
-            for s in sessions
-            if s.get("date") == today
+            s.get("duration_minutes", 0) for s in sessions if s.get("date") == today
         )
-        results.append({
-            "username": username,
-            "active": bool(data.get("active_session")),
-            "total_sessions": len(sessions),
-            "today_minutes": round(today_minutes, 1),
-        })
+        results.append(
+            {
+                "username": username,
+                "active": bool(data.get("active_session")),
+                "total_sessions": len(sessions),
+                "today_minutes": round(today_minutes, 1),
+            }
+        )
     return {"users": results}
 
 
@@ -161,4 +166,5 @@ def get_all_stats():
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8770)))

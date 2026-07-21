@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -26,10 +25,12 @@ DONE_DIR = EXTRACTOR_DIR / "done"
 OUTPUTS_DIR = ECOSYSTEM_DIR / "extractor" / "outputs"
 TASKS_DIR = ECOSYSTEM_DIR / "tasks"
 
+
 def ensure_dirs():
     """Ensure all required pipeline directories exist at startup."""
     for d in [CHUNKS_DIR, OUTPUTS_DIR, DATA_DIR, DONE_DIR, TASKS_DIR]:
         d.mkdir(parents=True, exist_ok=True)
+
 
 def atomic_write_json(path: Path, data: dict):
     """Writes JSON to a temporary file then renames to prevent corruption."""
@@ -43,24 +44,27 @@ def atomic_write_json(path: Path, data: dict):
             temp_path.unlink()
         raise e
 
+
 def load_manifest(manifest_path: Path) -> dict:
     """Reads manifest from disk."""
     if not manifest_path.exists():
         raise FileNotFoundError(f"Manifest not found: {manifest_path}")
-    with open(manifest_path, "r", encoding="utf-8") as f:
+    with open(manifest_path, encoding="utf-8") as f:
         return json.load(f)
+
 
 def get_task_status(task_path: Path) -> str | None:
     """Reads the status field from a task JSON file."""
     if not task_path.exists():
         return None
     try:
-        with open(task_path, "r", encoding="utf-8") as f:
+        with open(task_path, encoding="utf-8") as f:
             data = json.load(f)
             return data.get("status")
     except Exception as e:
         print(f"Warning: Failed to read task {task_path} — {e}", file=sys.stderr)
         return None
+
 
 def create_task(task_type: str, task_id: str, output_file: Path, prompt: str) -> dict:
     """Generates a standardized WESA task object."""
@@ -74,8 +78,9 @@ def create_task(task_type: str, task_id: str, output_file: Path, prompt: str) ->
         "error": "",
         "model_used": "",
         "output_file": str(output_file.relative_to(ECOSYSTEM_DIR)),
-        "prompt": prompt
+        "prompt": prompt,
     }
+
 
 def process_new_pdf(pdf_path: Path, category: str):
     """Step 1 & 2: Run chunker and drop extraction tasks."""
@@ -83,58 +88,65 @@ def process_new_pdf(pdf_path: Path, category: str):
     # Assumption: pdf_chunker.py is in the same directory or accessible via PATH
     chunker_script = SCRIPT_DIR / "pdf_chunker.py"
     try:
-        result = subprocess.run(
+        subprocess.run(
             [sys.executable, str(chunker_script), str(pdf_path), "--category", category],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
         # pdf_chunker.py writes manifest to DATA_DIR/<bookname>_manifest.json
         # bookname = lowercase stem, spaces→underscores, non-[a-z0-9_-] removed
         import re as _re
+
         _stem = pdf_path.stem.lower().replace(" ", "_")
         _bookname = _re.sub(r"[^a-z0-9_-]", "", _stem)
         manifest_path = DATA_DIR / f"{_bookname}_manifest.json"
-        
+
         if not manifest_path.exists():
-            print(f"Error: Chunking failed for {pdf_path.name}. Output manifest not found.", file=sys.stderr)
+            print(
+                f"Error: Chunking failed for {pdf_path.name}. Output manifest not found.",
+                file=sys.stderr,
+            )
             return
 
         manifest = load_manifest(manifest_path)
-        
+
         for chunk in manifest.get("chunks", []):
             if chunk.get("status") == "pending":
                 chunk_id = chunk["id"]
                 txt_path = WESA_DIR / chunk["txt"]
-                
+
                 if not txt_path.exists():
                     print(f"Warning: Missing text file for chunk {chunk_id}", file=sys.stderr)
                     continue
 
-                with open(txt_path, "r", encoding="utf-8") as f:
+                with open(txt_path, encoding="utf-8") as f:
                     content = f.read()
 
                 prompt = f"{category}\n{chunk['pages']}\n---\n{content}"
                 out_file = OUTPUTS_DIR / f"{chunk_id}_raw.json"
-                
+
                 task_id = f"wm-ex-{uuid.uuid4().hex[:8]}"
                 task_data = create_task("extract_pdf", task_id, out_file, prompt)
-                
+
                 # Save task
                 task_file = TASKS_DIR / f"{task_id}.json"
                 atomic_write_json(task_file, task_data)
-                
+
                 # Update manifest
                 chunk["status"] = "queued"
                 chunk["extract_task_id"] = task_id
-                
+
         atomic_write_json(manifest_path, manifest)
         print(f"Successfully queued extraction for {pdf_path.name}")
 
     except subprocess.CalledProcessError as e:
-        print(f"Error: Chunking subprocess failed for {pdf_path.name} — {e.stderr}", file=sys.stderr)
+        print(
+            f"Error: Chunking subprocess failed for {pdf_path.name} — {e.stderr}", file=sys.stderr
+        )
     except Exception as e:
         print(f"Error: Failed to process {pdf_path.name} — {e}", file=sys.stderr)
+
 
 def poll_tasks(category: str):
     """Step 3: Poll TASKS_DIR for completed extraction and validation tasks."""
@@ -143,39 +155,42 @@ def poll_tasks(category: str):
         manifest = load_manifest(manifest_path)
         # Only process manifests belonging to the target category if specified
         # (Assuming manifest contains category info or we check folder structure)
-        
+
         changed = False
-        
+
         for chunk in manifest.get("chunks", []):
             # 1. Check Extraction Completion
             if chunk["status"] == "queued":
                 task_id = chunk.get("extract_task_id")
-                if not task_id: continue
-                
+                if not task_id:
+                    continue
+
                 task_path = TASKS_DIR / f"{task_id}.json"
                 status = get_task_status(task_path)
-                
+
                 if status == "done":
                     # Check if output file exists
                     raw_json_path = OUTPUTS_DIR / f"{chunk['id']}_raw.json"
                     if raw_json_path.exists():
                         # Move to validation stage
                         chunk["status"] = "validating"
-                        chunk["validate_task_id"] = "" # placeholder
-                        
+                        chunk["validate_task_id"] = ""  # placeholder
+
                         # Prepare validation task — use txt path from manifest (includes category subfolder)
                         txt_file_path = WESA_DIR / chunk["txt"]
-                        with open(txt_file_path, "r", encoding="utf-8") as f:
+                        with open(txt_file_path, encoding="utf-8") as f:
                             txt_content = f.read()
-                        with open(raw_json_path, "r", encoding="utf-8") as f:
+                        with open(raw_json_path, encoding="utf-8") as f:
                             json_content = f.read()
-                        
+
                         prompt = f"{category}\n{chunk['pages']}\n---\nSOURCE TEXT:\n{txt_content}\n---\nQUESTIONS JSON:\n{json_content}"
                         val_out_file = OUTPUTS_DIR / f"{chunk['id']}_validated.json"
-                        
+
                         val_task_id = f"wm-vl-{uuid.uuid4().hex[:8]}"
-                        val_task_data = create_task("validate_questions", val_task_id, val_out_file, prompt)
-                        
+                        val_task_data = create_task(
+                            "validate_questions", val_task_id, val_out_file, prompt
+                        )
+
                         atomic_write_json(TASKS_DIR / f"{val_task_id}.json", val_task_data)
                         chunk["validate_task_id"] = val_task_id
                         changed = True
@@ -183,11 +198,12 @@ def poll_tasks(category: str):
             # 2. Check Validation Completion
             elif chunk["status"] == "validating":
                 task_id = chunk.get("validate_task_id")
-                if not task_id: continue
-                
+                if not task_id:
+                    continue
+
                 task_path = TASKS_DIR / f"{task_id}.json"
                 status = get_task_status(task_path)
-                
+
                 if status == "done":
                     val_json_path = OUTPUTS_DIR / f"{chunk['id']}_validated.json"
                     if val_json_path.exists():
@@ -206,7 +222,7 @@ def poll_tasks(category: str):
                     merge_book(manifest)
                     manifest["merge_status"] = "done"
                     atomic_write_json(manifest_path, manifest)
-                    
+
                     # Move source PDF to done
                     # We assume the manifest stores the original source path
                     src_pdf = Path(manifest["source_pdf"])
@@ -218,13 +234,16 @@ def poll_tasks(category: str):
                 except Exception as e:
                     print(f"Error during merge for {manifest_path.name} — {e}", file=sys.stderr)
 
+
 def manifest_exists_for_pdf(pdf_path: Path) -> bool:
     """Returns True if a manifest already exists for this PDF (already chunked)."""
     import re as _re
+
     _stem = pdf_path.stem.lower().replace(" ", "_")
     _bookname = _re.sub(r"[^a-z0-9_-]", "", _stem)
     manifest_path = DATA_DIR / f"{_bookname}_manifest.json"
     return manifest_path.exists()
+
 
 def run_one_shot(category_filter: str | None):
     """Single pass execution."""
@@ -251,6 +270,7 @@ def run_one_shot(category_filter: str | None):
     # Step 2 & 3: Process existing tasks
     poll_tasks(category_filter if category_filter else "all")
 
+
 def run_watcher(category_filter: str | None):
     """Continuous polling mode."""
     print(f"Starting Wolfmed Watcher (Filter: {category_filter or 'None'})...")
@@ -258,21 +278,25 @@ def run_watcher(category_filter: str | None):
         run_one_shot(category_filter)
         time.sleep(30)
 
+
 def check_merges(category_filter: str | None):
     """Check for manifests that are stuck or pending merge."""
     for manifest_path in DATA_DIR.glob("*_manifest.json"):
         manifest = load_manifest(manifest_path)
         if manifest.get("merge_status") != "done":
-            print(f"Pending merge: {manifest_path.name} ({manifest.get('validated_count', 0)}/{len(manifest.get('chunks', []))})")
+            print(
+                f"Pending merge: {manifest_path.name} ({manifest.get('validated_count', 0)}/{len(manifest.get('chunks', []))})"
+            )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Wolfmed Intake Orchestrator")
     parser.add_argument("--watch", action="store_true", help="Continuous polling mode")
     parser.add_argument("--check-merges", action="store_true", help="Check for pending merges only")
     parser.add_argument("--category", type=str, help="Filter by specific category folder")
-    
+
     args = parser.parse_args()
-    
+
     try:
         if args.watch:
             run_watcher(args.category)

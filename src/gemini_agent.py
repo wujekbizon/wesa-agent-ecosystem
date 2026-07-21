@@ -1,5 +1,28 @@
 """
 WESA Agent Ecosystem - Gemini Agent
+
+** REVIVED 2026-06-20 ** (was dead 2026-06-13 -> 2026-06-20, E0.3 audit)
+Gemini free tier expired 2026-05-07; Greg provisioned a new GOOGLE_API_KEY on
+2026-06-20 (3-month free trial, EXPIRES 2026-09-20). Key lives in .env (this
+module reads it via os.getenv("GOOGLE_API_KEY") below — there is no
+vault-injection wiring yet, that's E1 provider-abstraction work) and is
+mirrored in secure_core vault (status=active, rotate_by=2026-09-20) for
+audit/redaction coverage. src.router constructs this class normally again
+for any skill with model='gemini' — see router.py _get_agent().
+
+ACTION BY 2026-09-20: renew/replace the key or this whole fleet (R1, W1, UX1,
+FE1, PM1, Q1, SU1, T1, A1, EX1) goes dark again. See the 2026-06-14 Gemini
+replacement options report (_plans/) if migrating off Google instead.
+
+Still relevant context from the dead period, kept for the provider rewrite:
+  - this is a working reference implementation of the agent.run() contract
+    that OllamaAgent and the future OpenAICompatProvider/ClaudeCodeProvider
+    (E1) also implement.
+  - `google-genai` lives in the optional `gemini-legacy` extra in
+    pyproject.toml rather than core deps — still true, not undone by reviving
+    the key. Reinstall that extra if a fresh environment errors on import.
+
+---
 Handles: research, analysis, writing, QA review tasks.
 Model: gemini-2.5-flash
 

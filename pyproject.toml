@@ -1,34 +1,64 @@
-To establish the linting and formatting foundation for the WESA agent ecosystem, I am configuring `ruff` via `pyproject.toml` and setting up the corresponding pre-commit hooks. This ensures consistent code quality across all daemon and web monitoring scripts before they enter the CI pipeline.
-
-### Configuration Approach
-1.  **Project Metadata**: Defined in `[project]` to enforce Python 3.12 and set the correct versioning.
-2.  **Ruff Core**: Configured for Python 3.12 target with a 100-character line limit. The rule set covers standard errors (`E`), syntax issues (`F`), import sorting (`I`), warnings (`W`), and modernization (`UP`). We ignore `E501` specifically because the line length is enforced by the formatter, not the checker.
-3.  **Formatting**: Enforced to use double quotes and space indentation for a clean, professional look.
-4.  **Pre-commit Hooks**: Configured to run `ruff check --fix` (auto-fixing safe errors) and `ruff format` on every commit, ensuring the codebase remains compliant at the source.
-
----
-
 [project]
 name = "wesa-agent-ecosystem"
-version = "0.5.0"
-requires-python = ">=3.12"
+version = "0.5.1"
+description = "WESA agent ecosystem - daemon, dashboard, pipelines, and secure core."
+requires-python = ">=3.10"
+dependencies = [
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "httpx>=0.27.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0.0",
+    "pypdf>=4.0.0",
+    "cryptography>=42.0.0",
+    "pydantic-settings>=2.4.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "mcp>=1.0.0",
+    "psycopg[binary]>=3.1",  # memory system (Neon Postgres), sync driver
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.4.0",
+    "pre-commit>=3.7.0",
+    # Userspace Postgres for the memory tests. Linux/macOS only (no Windows
+    # wheel — it bundles Postgres binaries). On Windows, verify the memory
+    # system with the live smoke scripts against Neon instead of pgserver.
+    "pgserver>=0.1.4; platform_system != 'Windows'",
+]
+# google-genai intentionally NOT listed as a core dependency anymore.
+# Gemini access is dead (2026-05-07). Code paths that import it are
+# tracked in E0.3 (dead Gemini code audit) and either removed or
+# isolated behind an optional extra.
+gemini-legacy = [
+    "google-genai>=1.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Existing layout is a flat `src/` package (not src/wesa_agents/ yet --
+# that restructure is E1 scope per the v2 roadmap). Package it as-is so
+# `pip install -e .` works without sys.path hacks in the meantime.
+packages = ["src", "secure_core"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py310"
 line-length = 100
+exclude = ["__pycache__", ".venv", "venv", "tests", "node_modules"]
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP"]
 ignore = ["E501"]
-exclude = ["__pycache__", ".venv", "venv"]
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 
----FILE: .pre-commit-config.yaml---
-repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.4.0
-    hooks:
-      - id: ruff
-        args: ["--fix"]
-      - id: ruff-format
+[tool.pytest.ini_options]
+testpaths = ["tests_unit"]
+pythonpath = ["."]

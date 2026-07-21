@@ -1,10 +1,11 @@
 import base64
 from contextlib import asynccontextmanager
+
+import uvicorn
 from mcp.server.fastmcp import FastMCP
+from playwright.async_api import async_playwright
 from starlette.responses import JSONResponse
 from starlette.routing import Route
-from playwright.async_api import async_playwright
-import uvicorn
 
 # Module-level globals for persistent async browser session
 _playwright = None

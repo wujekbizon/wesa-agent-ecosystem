@@ -16,22 +16,21 @@ import json
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
-
 
 # All logs/* paths — consistent with existing daemon.py conventions
-QUEUE_FILE                 = Path("logs/rc_queue.json")           # alongside rc_schedule.json
-KNOWLEDGE_INDEX_FILE       = Path("logs/knowledge_index.json")
+QUEUE_FILE = Path("logs/rc_queue.json")  # alongside rc_schedule.json
+KNOWLEDGE_INDEX_FILE = Path("logs/knowledge_index.json")
 KNOWLEDGE_RECENT_HIGH_FILE = Path("logs/knowledge_recent_high.json")
-KNOWLEDGE_BRIEFS_DIR       = Path("logs/research/briefs")         # full brief files in research/
+KNOWLEDGE_BRIEFS_DIR = Path("logs/research/briefs")  # full brief files in research/
 
-MAX_PENDING        = 50
-DEDUP_WINDOW_DAYS  = 30
+MAX_PENDING = 50
+DEDUP_WINDOW_DAYS = 30
 
 
 # ---------------------------------------------------------------------------
 # Queue management
 # ---------------------------------------------------------------------------
+
 
 def load_queue() -> dict:
     if QUEUE_FILE.exists():
@@ -55,7 +54,7 @@ def save_queue(queue: dict) -> None:
     QUEUE_FILE.write_text(json.dumps(queue, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def next_topic(queue: dict) -> Optional[dict]:
+def next_topic(queue: dict) -> dict | None:
     """
     Pop the highest-priority pending topic (high priority first, then descending composite score).
     Moves the item to in_progress atomically. Returns topic dict or None if queue is empty.
@@ -134,7 +133,7 @@ def merge_scout_results(raw_output: str, channel: str, queue: dict) -> int:
     if len(pending) > MAX_PENDING:
         normal = sorted(
             [t for t in pending if t.get("priority") != "high"],
-            key=lambda t: t.get("composite_score", 0)
+            key=lambda t: t.get("composite_score", 0),
         )
         to_drop = len(pending) - MAX_PENDING
         drop_ids = {t["id"] for t in normal[:to_drop]}
@@ -147,6 +146,7 @@ def merge_scout_results(raw_output: str, channel: str, queue: dict) -> int:
 # ---------------------------------------------------------------------------
 # RT1 routing
 # ---------------------------------------------------------------------------
+
 
 def handle_rt1_result(
     rt1_output: str,
@@ -167,7 +167,11 @@ def handle_rt1_result(
             "composite_score": 0.0,
             "reason": "RT1 output parse failed — defaulting to AUTO-SAVE",
             "scores": {},
-            "veto_checks": {"domain_aligned": True, "duplicate_found": False, "duplicate_match": None},
+            "veto_checks": {
+                "domain_aligned": True,
+                "duplicate_found": False,
+                "duplicate_match": None,
+            },
         }
 
     decision = decision_data.get("decision", "AUTO-SAVE").upper()
@@ -198,6 +202,7 @@ def handle_rt1_result(
 # Knowledge store
 # ---------------------------------------------------------------------------
 
+
 def _save_to_knowledge_store(topic: str, brief_content: str, decision_data: dict) -> str:
     """Write full brief to logs/research/briefs/ and update logs/knowledge_index.json."""
     KNOWLEDGE_BRIEFS_DIR.mkdir(parents=True, exist_ok=True)
@@ -219,15 +224,18 @@ def _save_to_knowledge_store(topic: str, brief_content: str, decision_data: dict
     )
 
     index = _load_knowledge_index()
-    index["briefs"].insert(0, {
-        "id": brief_id,
-        "title": topic,
-        "summary": _extract_summary(brief_content),
-        "domain": _infer_domain(topic),
-        "composite_score": score,
-        "saved_at": datetime.now().isoformat(),
-        "decision": decision_data.get("decision", "AUTO-SAVE"),
-    })
+    index["briefs"].insert(
+        0,
+        {
+            "id": brief_id,
+            "title": topic,
+            "summary": _extract_summary(brief_content),
+            "domain": _infer_domain(topic),
+            "composite_score": score,
+            "saved_at": datetime.now().isoformat(),
+            "decision": decision_data.get("decision", "AUTO-SAVE"),
+        },
+    )
     index["total_briefs"] = len(index["briefs"])
     index["last_updated"] = datetime.now().isoformat()
     _save_knowledge_index(index)
@@ -247,20 +255,24 @@ def _load_knowledge_index() -> dict:
 
 def _save_knowledge_index(index: dict) -> None:
     KNOWLEDGE_INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
-    KNOWLEDGE_INDEX_FILE.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
+    KNOWLEDGE_INDEX_FILE.write_text(
+        json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def _rebuild_recent_high(index: dict) -> None:
     """Rebuild logs/knowledge_recent_high.json — briefs from last 7 days with score >= 15."""
     cutoff = (datetime.now() - timedelta(days=7)).isoformat()
     recent_high = [
-        b for b in index.get("briefs", [])
+        b
+        for b in index.get("briefs", [])
         if b.get("composite_score", 0) >= 15 and (b.get("saved_at") or "") >= cutoff
     ]
     KNOWLEDGE_RECENT_HIGH_FILE.write_text(
         json.dumps(
             {"generated_at": datetime.now().isoformat(), "briefs": recent_high},
-            indent=2, ensure_ascii=False
+            indent=2,
+            ensure_ascii=False,
         ),
         encoding="utf-8",
     )
@@ -270,9 +282,7 @@ def _get_recent_knowledge_titles() -> set:
     index = _load_knowledge_index()
     cutoff = (datetime.now() - timedelta(days=DEDUP_WINDOW_DAYS)).isoformat()
     return {
-        b["title"].lower()
-        for b in index.get("briefs", [])
-        if (b.get("saved_at") or "") >= cutoff
+        b["title"].lower() for b in index.get("briefs", []) if (b.get("saved_at") or "") >= cutoff
     }
 
 
@@ -292,6 +302,7 @@ def _is_recent_duplicate(title: str, known_titles: set) -> bool:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _parse_json_array(text: str) -> list:
     text = re.sub(r"```(?:json)?\n?", "", text).strip().rstrip("`")
     match = re.search(r"\[.*\]", text, re.DOTALL)
@@ -303,7 +314,7 @@ def _parse_json_array(text: str) -> list:
     return []
 
 
-def _parse_json_object(text: str) -> Optional[dict]:
+def _parse_json_object(text: str) -> dict | None:
     text = re.sub(r"```(?:json)?\n?", "", text).strip().rstrip("`")
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
@@ -327,7 +338,10 @@ def _infer_domain(topic: str) -> str:
         return "edu-ai"
     if any(w in topic_lower for w in ["agenthire", "marketplace", "saas"]):
         return "saas-marketplace"
-    if any(w in topic_lower for w in ["agent", "daemon", "wesa", "orchestration", "langchain", "crewai"]):
+    if any(
+        w in topic_lower
+        for w in ["agent", "daemon", "wesa", "orchestration", "langchain", "crewai"]
+    ):
         return "agent-ecosystem"
     return "ai-frontier"
 

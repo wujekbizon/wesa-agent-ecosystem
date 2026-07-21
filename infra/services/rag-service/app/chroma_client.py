@@ -3,8 +3,9 @@ ChromaDB client for Lumio RAG service.
 One collection per username — fully isolated per kid.
 """
 
-import os
 import logging
+import os
+
 import chromadb
 from chromadb.config import Settings
 

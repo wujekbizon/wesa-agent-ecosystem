@@ -38,14 +38,14 @@ def repair_json(raw: str) -> str:
     except json.JSONDecodeError:
         pass
     # Attempt 2: strip non-printable control chars, retry
-    cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', raw)
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", raw)
     try:
         json.loads(cleaned, strict=False)
         return cleaned
     except json.JSONDecodeError:
         pass
     # Attempt 3: handle truncated output (missing closing bracket)
-    for suffix in [']', '\n]']:
+    for suffix in ["]", "\n]"]:
         candidate = cleaned.rstrip() + suffix
         try:
             json.loads(candidate, strict=False)
@@ -53,6 +53,7 @@ def repair_json(raw: str) -> str:
         except json.JSONDecodeError:
             pass
     raise ValueError("Could not repair JSON output from agent")
+
 
 # ---------------------------------------------------------------------------
 # Path constants (WESA standard — no traversing __file__.parent chains)
@@ -72,6 +73,7 @@ WOLFMED_DB = DATA_DIR / "wolfmed.db"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def ensure_dirs():
     for d in [OUTPUTS_DIR, DONE_DIR, DATA_DIR, TASKS_DIR]:
@@ -96,7 +98,7 @@ def atomic_write_json(path: Path, data: dict):
 
 
 def load_manifest(path: Path) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -104,7 +106,7 @@ def get_task_status(task_path: Path) -> str | None:
     if not task_path.exists():
         return None
     try:
-        with open(task_path, "r", encoding="utf-8") as f:
+        with open(task_path, encoding="utf-8") as f:
             return json.load(f).get("status")
     except Exception as e:
         print(f"Warning: failed to read task {task_path} — {e}", file=sys.stderr)
@@ -138,6 +140,7 @@ def manifest_exists(stem: str) -> bool:
 # UUID registry (mirrors merge_utils logic — operates on wolfmed.db directly)
 # ---------------------------------------------------------------------------
 
+
 def get_db_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(WOLFMED_DB)
     conn.row_factory = sqlite3.Row
@@ -164,6 +167,7 @@ def initialize_db():
 # Phase 1: Process new TXT file — create manifest + drop generate task
 # ---------------------------------------------------------------------------
 
+
 def process_new_txt(txt_path: Path, category: str):
     stem = sanitize_stem(txt_path.stem)
 
@@ -172,7 +176,7 @@ def process_new_txt(txt_path: Path, category: str):
         return
 
     try:
-        with open(txt_path, "r", encoding="utf-8") as f:
+        with open(txt_path, encoding="utf-8") as f:
             content = f.read()
     except Exception as e:
         print(f"Error reading {txt_path}: {e}", file=sys.stderr)
@@ -185,7 +189,7 @@ def process_new_txt(txt_path: Path, category: str):
     run_id = str(uuid.uuid4())
     now = datetime.now().isoformat()
     raw_json_path = OUTPUTS_DIR / f"{stem}_raw.json"
-    validated_json_path = OUTPUTS_DIR / f"{stem}_validated.json"
+    OUTPUTS_DIR / f"{stem}_validated.json"
 
     manifest = {
         "run_id": run_id,
@@ -228,6 +232,7 @@ def process_new_txt(txt_path: Path, category: str):
 # Phase 2 & 3: Poll tasks — advance through queued → validating → validated
 # ---------------------------------------------------------------------------
 
+
 def poll_tasks(category_filter: str | None):
     for manifest_path in DATA_DIR.glob("*_manifest.json"):
         manifest = load_manifest(manifest_path)
@@ -249,15 +254,18 @@ def poll_tasks(category_filter: str | None):
             if status == "done":
                 raw_json_path = OUTPUTS_DIR / f"{chunk['id']}_raw.json"
                 if not raw_json_path.exists():
-                    print(f"Warning: generate task done but raw JSON missing: {raw_json_path}", file=sys.stderr)
+                    print(
+                        f"Warning: generate task done but raw JSON missing: {raw_json_path}",
+                        file=sys.stderr,
+                    )
                     continue
 
                 # Read source text for validation prompt
                 source_txt_path = WESA_DIR / chunk["txt"]
                 try:
-                    with open(source_txt_path, "r", encoding="utf-8") as f:
+                    with open(source_txt_path, encoding="utf-8") as f:
                         txt_content = f.read()
-                    with open(raw_json_path, "r", encoding="utf-8") as f:
+                    with open(raw_json_path, encoding="utf-8") as f:
                         raw_json_content = repair_json(f.read())
                 except Exception as e:
                     print(f"Error reading files for validation: {e}", file=sys.stderr)
@@ -298,10 +306,7 @@ def poll_tasks(category_filter: str | None):
             atomic_write_json(manifest_path, manifest)
 
         # --- Merge trigger ---
-        if (
-            manifest.get("validated_count", 0) == 1
-            and manifest.get("merge_status") != "done"
-        ):
+        if manifest.get("validated_count", 0) == 1 and manifest.get("merge_status") != "done":
             try:
                 merge_slides(manifest, manifest_path)
             except Exception as e:
@@ -311,6 +316,7 @@ def poll_tasks(category_filter: str | None):
 # ---------------------------------------------------------------------------
 # Phase 4: Inline merge (cannot use merge_utils.merge_book — wrong glob pattern)
 # ---------------------------------------------------------------------------
+
 
 def merge_slides(manifest: dict, manifest_path: Path):
     stem = manifest["book"]
@@ -322,7 +328,7 @@ def merge_slides(manifest: dict, manifest_path: Path):
         print(f"Error: validated file missing: {validated_path}", file=sys.stderr)
         return
 
-    with open(validated_path, "r", encoding="utf-8") as f:
+    with open(validated_path, encoding="utf-8") as f:
         raw = f.read()
 
     try:
@@ -343,7 +349,7 @@ def merge_slides(manifest: dict, manifest_path: Path):
     seen_questions = set()
     if output_path.exists():
         try:
-            with open(output_path, "r", encoding="utf-8") as f:
+            with open(output_path, encoding="utf-8") as f:
                 existing_entries = json.load(f)
             for e in existing_entries:
                 q = e.get("data", {}).get("question", "")
@@ -382,9 +388,7 @@ def merge_slides(manifest: dict, manifest_path: Path):
 
             # UUID uniqueness
             current_uuid = entry.get("id", str(uuid.uuid4()))
-            cursor = conn.execute(
-                "SELECT uuid FROM uuid_registry WHERE uuid = ?", (current_uuid,)
-            )
+            cursor = conn.execute("SELECT uuid FROM uuid_registry WHERE uuid = ?", (current_uuid,))
             if cursor.fetchone():
                 current_uuid = str(uuid.uuid4())
                 entry["id"] = current_uuid
@@ -419,6 +423,7 @@ def merge_slides(manifest: dict, manifest_path: Path):
 # ---------------------------------------------------------------------------
 # CLI modes
 # ---------------------------------------------------------------------------
+
 
 def check_merges(category_filter: str | None):
     found = False

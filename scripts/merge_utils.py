@@ -1,8 +1,8 @@
+import argparse
+import hashlib
 import json
 import sqlite3
 import sys
-import argparse
-import hashlib
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -19,11 +19,13 @@ WOLFMED_DB = DATA_DIR / "wolfmed.db"
 UUID_REGISTRY_JSON = DATA_DIR / "uuid_registry.json"
 OUTPUTS_DIR = ECOSYSTEM_DIR / "extractor" / "outputs"
 
+
 def get_db_connection():
     """Returns a connection to the SQLite registry."""
     conn = sqlite3.connect(WOLFMED_DB)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def initialize_db():
     """Ensures table exists and migrates legacy JSON registry if needed."""
@@ -37,27 +39,26 @@ def initialize_db():
                 registered_at TEXT
             )
         """)
-        
+
         # Check if migration is needed
         cursor = conn.execute("SELECT COUNT(*) FROM uuid_registry")
         count = cursor.fetchone()[0]
-        
+
         if count == 0 and UUID_REGISTRY_JSON.exists():
-            with open(UUID_REGISTRY_JSON, 'r') as f:
+            with open(UUID_REGISTRY_JSON) as f:
                 legacy_uuids = json.load(f)
-            
+
             now = datetime.now().isoformat()
-            data_to_insert = [
-                (str(u), "legacy", "", now) for u in legacy_uuids
-            ]
+            data_to_insert = [(str(u), "legacy", "", now) for u in legacy_uuids]
             if data_to_insert:
                 conn.executemany(
                     "INSERT INTO uuid_registry (uuid, category, question_hash, registered_at) VALUES (?, ?, ?, ?)",
-                    data_to_insert
+                    data_to_insert,
                 )
             conn.commit()
     finally:
         conn.close()
+
 
 def validate_entry(entry: dict) -> bool:
     """Performs structural and content validation on a single question entry."""
@@ -68,18 +69,19 @@ def validate_entry(entry: dict) -> bool:
 
         if not isinstance(question, str) or len(question.strip()) < 5:
             return False
-        
+
         if not isinstance(answers, list) or len(answers) != 4:
             return False
-        
+
         correct_count = sum(1 for a in answers if a.get("isCorrect") is True)
         if correct_count != 1:
             return False
-            
+
         return True
     except Exception as e:
         print(f"Warning: Entry validation failed — {e}", file=sys.stderr)
         return False
+
 
 def merge_book(manifest: dict, output_path: Path | None = None) -> Path:
     """
@@ -88,66 +90,70 @@ def merge_book(manifest: dict, output_path: Path | None = None) -> Path:
     initialize_db()
     category = manifest.get("category", "unknown")
     book_name = manifest.get("book", manifest.get("book_name", "unknown"))
-    
+
     # Ensure output directory exists
     DONE_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     target_output = output_path or (DONE_DIR / f"{category}_all_merged.json")
     if target_output.exists():
-        raise FileExistsError(f"Output file already exists: {target_output}. Use --overwrite to replace.")
+        raise FileExistsError(
+            f"Output file already exists: {target_output}. Use --overwrite to replace."
+        )
 
     # 1. Load all *_validated.json files
     pattern = f"{book_name}_page_*_validated.json"
     input_files = list(OUTPUTS_DIR.glob(pattern))
-    
+
     if not input_files:
         raise FileNotFoundError(f"No validated chunks found in {OUTPUTS_DIR} matching {pattern}")
 
     all_entries = []
-    seen_questions = set() # For deduplication by text
-    
+    seen_questions = set()  # For deduplication by text
+
     conn = get_db_connection()
-    
+
     try:
         for file_path in input_files:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding="utf-8") as f:
                 chunks = json.load(f)
-                
+
             for entry in chunks:
                 # 2. Normalize Schema
                 meta = entry.get("meta", {})
                 data = entry.get("data", {})
-                
+
                 if "course" not in meta:
                     meta["course"] = "pielegniarstwo"
                 if "category" not in meta:
                     meta["category"] = category
-                
+
                 # 3. Deduplicate by question text
                 q_text = data.get("question", "").strip()
                 q_norm = q_text.lower()
-                
+
                 if not q_norm or q_norm in seen_questions:
                     continue
-                
+
                 # 4. UUID Uniqueness Check & Registration
                 current_uuid = entry.get("id")
-                
+
                 # Check if UUID exists in DB
-                cursor = conn.execute("SELECT uuid FROM uuid_registry WHERE uuid = ?", (str(current_uuid),))
+                cursor = conn.execute(
+                    "SELECT uuid FROM uuid_registry WHERE uuid = ?", (str(current_uuid),)
+                )
                 if cursor.fetchone():
                     # Collision: Generate new UUID
                     current_uuid = str(uuid4())
                     entry["id"] = current_uuid
-                
+
                 # Register the UUID
                 q_hash = hashlib.sha256(q_norm.encode()).hexdigest()
                 now = datetime.now().isoformat()
                 conn.execute(
                     "INSERT OR IGNORE INTO uuid_registry (uuid, category, question_hash, registered_at) VALUES (?, ?, ?, ?)",
-                    (str(current_uuid), category, q_hash, now)
+                    (str(current_uuid), category, q_hash, now),
                 )
-                
+
                 # 5. Final Validation & Collection
                 if validate_entry(entry):
                     all_entries.append(entry)
@@ -156,16 +162,16 @@ def merge_book(manifest: dict, output_path: Path | None = None) -> Path:
         conn.commit()
 
         # Write Output
-        with open(target_output, 'w', encoding='utf-8') as f:
+        with open(target_output, "w", encoding="utf-8") as f:
             json.dump(all_entries, f, indent=2, ensure_ascii=False)
 
         # 6. Update Manifest
         manifest["merge_status"] = "done"
         manifest["updated_at"] = datetime.now().isoformat()
-        
-        # We assume the caller handles writing the manifest back to disk, 
+
+        # We assume the caller handles writing the manifest back to disk,
         # but we update the dict object provided.
-        
+
         return target_output
 
     except Exception as e:
@@ -175,43 +181,49 @@ def merge_book(manifest: dict, output_path: Path | None = None) -> Path:
     finally:
         conn.close()
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Merge validated JSON chunks into a single question bank.")
-    parser.add_argument("--manifest", type=Path, required=True, help="Path to the book manifest JSON")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output if present")
-    
+    parser = argparse.ArgumentParser(
+        description="Merge validated JSON chunks into a single question bank."
+    )
+    parser.add_argument(
+        "--manifest", type=Path, required=True, help="Path to the book manifest JSON"
+    )
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Overwrite existing output if present"
+    )
+
     args = parser.parse_args()
 
     try:
         initialize_db()
-        
+
         if not args.manifest.exists():
             print(f"Error: Manifest not found at {args.manifest}", file=sys.stderr)
             sys.exit(1)
-            
-        with open(args.manifest, 'r', encoding='utf-8') as f:
+
+        with open(args.manifest, encoding="utf-8") as f:
             manifest_data = json.load(f)
 
         # Handle overwrite logic for the function call
         # Note: The function itself raises error if exists, so we handle it here
         result_path = merge_book(manifest_data)
-        
+
         # Update the actual file on disk
-        with open(args.manifest, 'w', encoding='utf-8') as f:
+        with open(args.manifest, "w", encoding="utf-8") as f:
             json.dump(manifest_data, f, indent=2)
-            
+
         print(f"Successfully merged. Output: {result_path}")
-        
+
     except FileExistsError as e:
         if args.overwrite:
-            # In a real production environment, we'd implement a more robust 
+            # In a real production environment, we'd implement a more robust
             # deletion/replacement strategy, but for this script we follow the spec.
-            print(f"Overwrite requested. Re-running merge...")
+            print("Overwrite requested. Re-running merge...")
             # This is a simplified retry for the CLI context
-            import os
-            # We'd need to find the target path to delete it. 
+            # We'd need to find the target path to delete it.
             # For simplicity in this script, we assume the user knows the target.
-            sys.exit(1) 
+            sys.exit(1)
         else:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)

@@ -6,11 +6,12 @@ They proxy to infra_manager running on the Ubuntu VM.
 Usage: merge this into web_monitor.py manually or via D1 task.
 """
 
-import os
 import logging
+import os
+
 import httpx
 from fastapi import HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 
 log = logging.getLogger("monitor.infra")
 
@@ -27,7 +28,9 @@ async def _infra_get(path: str) -> JSONResponse:
             r = await client.get(f"{INFRA_MANAGER_URL}{path}")
             return JSONResponse(content=r.json(), status_code=r.status_code)
     except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Infra manager unreachable. Is Ubuntu VM running?")
+        raise HTTPException(
+            status_code=503, detail="Infra manager unreachable. Is Ubuntu VM running?"
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -38,7 +41,9 @@ async def _infra_post(path: str, body: dict = None) -> JSONResponse:
             r = await client.post(f"{INFRA_MANAGER_URL}{path}", json=body or {})
             return JSONResponse(content=r.json(), status_code=r.status_code)
     except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Infra manager unreachable. Is Ubuntu VM running?")
+        raise HTTPException(
+            status_code=503, detail="Infra manager unreachable. Is Ubuntu VM running?"
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

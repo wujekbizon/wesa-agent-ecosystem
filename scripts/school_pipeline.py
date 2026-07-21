@@ -51,8 +51,9 @@ ARCHITECTURE_FILE = SCHOOL_DIR / "ARCHITECTURE.md"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def load_domain(config_path: Path) -> dict:
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(config_path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -64,7 +65,7 @@ def load_arch_sections(path: Path) -> dict:
     sections: dict[str, list[str]] = {}
     current: str | None = None
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             if line.startswith("## "):
                 current = line.strip()[3:]
@@ -105,6 +106,7 @@ def drop_task(task: dict, dry_run: bool = False) -> None:
 # Stage 1 — Data entities + DbContext
 # ---------------------------------------------------------------------------
 
+
 def stage_1(domain: dict, arch: dict) -> list[dict]:
     sol = domain["solution"]["name"]
     ns = domain["solution"]["namespace_root"]
@@ -127,7 +129,7 @@ def stage_1(domain: dict, arch: dict) -> list[dict]:
             if f.get("required"):
                 lines.append(f'[Required(ErrorMessage = "{f["name"]} is required")]')
             if f.get("max_length"):
-                lines.append(f'[MaxLength({f["max_length"]})]')
+                lines.append(f"[MaxLength({f['max_length']})]")
             lines.append(f'[Display(Name = "{f["name"]}")]')
             if f.get("column"):
                 lines.append(f'[Column(TypeName = "{f["column"]}")]')
@@ -144,7 +146,7 @@ def stage_1(domain: dict, arch: dict) -> list[dict]:
                 elif req:
                     prop = f"public required string {fn} {{ get; set; }}"
                 else:
-                    prop = f'public string {fn} {{ get; set; }} = string.Empty;'
+                    prop = f"public string {fn} {{ get; set; }} = string.Empty;"
             elif ft == "decimal":
                 prop = f"public decimal {fn} {{ get; set; }}"
             elif ft == "int":
@@ -162,7 +164,7 @@ def stage_1(domain: dict, arch: dict) -> list[dict]:
         fk_block = ""
         if fk_parent:
             fk_block = (
-                f"\n        [ForeignKey(\"{fk_parent}\")]\n"
+                f'\n        [ForeignKey("{fk_parent}")]\n'
                 f"        public int Id{fk_parent} {{ get; set; }}\n"
                 f"        public {fk_parent}? {fk_parent} {{ get; set; }}"
             )
@@ -170,8 +172,7 @@ def stage_1(domain: dict, arch: dict) -> list[dict]:
         child_block = ""
         for child in children:
             child_block += (
-                f"\n        public ICollection<{child}> {child} {{ get; }} "
-                f"= new List<{child}>();"
+                f"\n        public ICollection<{child}> {child} {{ get; }} = new List<{child}>();"
             )
 
         fields_str = "\n\n".join(field_blocks)
@@ -201,27 +202,26 @@ RULES:
 - Output ONLY the C# file. No markdown fences. No explanation.
 - FILES NOT TO TOUCH: anything other than {name}.cs
 """
-        tasks.append({
-            "task_id": new_id(f"school-data-{name.lower()}"),
-            "type": "code",
-            "prompt": prompt,
-            "output_file": school_path(sol, f"{sol}.Data", "Data", folder, f"{name}.cs"),
-        })
+        tasks.append(
+            {
+                "task_id": new_id(f"school-data-{name.lower()}"),
+                "type": "code",
+                "prompt": prompt,
+                "output_file": school_path(sol, f"{sol}.Data", "Data", folder, f"{name}.cs"),
+            }
+        )
 
     # DbContext
     dbsets = "\n        ".join(
-        f"public DbSet<{e['name']}> {e['name']} {{ get; set; }} = default!;"
-        for e in entities
+        f"public DbSet<{e['name']}> {e['name']} {{ get; set; }} = default!;" for e in entities
     )
-    usings = "\n".join(sorted({
-        f"using {ns}.Data.Data.{e['domain']};"
-        for e in entities
-    }))
+    usings = "\n".join(sorted({f"using {ns}.Data.Data.{e['domain']};" for e in entities}))
 
-    tasks.append({
-        "task_id": new_id("school-data-context"),
-        "type": "code",
-        "prompt": f"""You are writing the DbContext class for an ASP.NET Core MVC solution.
+    tasks.append(
+        {
+            "task_id": new_id("school-data-context"),
+            "type": "code",
+            "prompt": f"""You are writing the DbContext class for an ASP.NET Core MVC solution.
 
 ARCHITECTURE REFERENCE — follow FirmaContext pattern exactly:
 {pattern}
@@ -244,8 +244,9 @@ RULES:
 - Output ONLY the C# file. No markdown fences. No explanation.
 - FILES NOT TO TOUCH: any entity .cs files
 """,
-        "output_file": school_path(sol, f"{sol}.Data", f"{ctx}.cs"),
-    })
+            "output_file": school_path(sol, f"{sol}.Data", f"{ctx}.cs"),
+        }
+    )
 
     return tasks
 
@@ -253,6 +254,7 @@ RULES:
 # ---------------------------------------------------------------------------
 # Stage 2 — Interfaces
 # ---------------------------------------------------------------------------
+
 
 def stage_2(domain: dict, arch: dict) -> list[dict]:
     sol = domain["solution"]["name"]
@@ -290,10 +292,11 @@ def stage_2(domain: dict, arch: dict) -> list[dict]:
 
         methods_str = "\n        ".join(methods)
 
-        tasks.append({
-            "task_id": new_id(f"school-iface-{name.lower()}"),
-            "type": "code",
-            "prompt": f"""You are writing a C# service interface for an ASP.NET Core MVC solution.
+        tasks.append(
+            {
+                "task_id": new_id(f"school-iface-{name.lower()}"),
+                "type": "code",
+                "prompt": f"""You are writing a C# service interface for an ASP.NET Core MVC solution.
 
 ARCHITECTURE REFERENCE — follow this pattern exactly:
 {pattern}
@@ -312,8 +315,9 @@ RULES:
 - Output ONLY the C# file. No markdown fences. No explanation.
 - FILES NOT TO TOUCH: any other interface or entity file
 """,
-            "output_file": school_path(sol, f"{sol}.Interfaces", folder, f"I{name}Service.cs"),
-        })
+                "output_file": school_path(sol, f"{sol}.Interfaces", folder, f"I{name}Service.cs"),
+            }
+        )
 
     return tasks
 
@@ -321,6 +325,7 @@ RULES:
 # ---------------------------------------------------------------------------
 # Stage 3 — Services
 # ---------------------------------------------------------------------------
+
 
 def stage_3(domain: dict, arch: dict) -> list[dict]:
     sol = domain["solution"]["name"]
@@ -332,10 +337,11 @@ def stage_3(domain: dict, arch: dict) -> list[dict]:
     tasks = []
 
     # BaseService
-    tasks.append({
-        "task_id": new_id("school-svc-base"),
-        "type": "code",
-        "prompt": f"""You are writing the abstract BaseService class for an ASP.NET Core MVC solution.
+    tasks.append(
+        {
+            "task_id": new_id("school-svc-base"),
+            "type": "code",
+            "prompt": f"""You are writing the abstract BaseService class for an ASP.NET Core MVC solution.
 
 ARCHITECTURE REFERENCE — follow BaseService pattern exactly:
 {pattern}
@@ -354,8 +360,9 @@ RULES:
 - Output ONLY the C# file. No markdown fences. No explanation.
 - FILES NOT TO TOUCH: any service implementation file
 """,
-        "output_file": school_path(sol, f"{sol}.Services", "Abstrakcja", "BaseService.cs"),
-    })
+            "output_file": school_path(sol, f"{sol}.Services", "Abstrakcja", "BaseService.cs"),
+        }
+    )
 
     portal_entities = [e for e in entities if e.get("portal_exposed")]
 
@@ -388,9 +395,7 @@ RULES:
 
         if "A" in additional and additional["A"]["entity"] == name:
             search_fields = additional["A"].get("search_fields", ["Name"])
-            where_clause = " || ".join(
-                f'x.{sf}.Contains(query)' for sf in search_fields
-            )
+            where_clause = " || ".join(f"x.{sf}.Contains(query)" for sf in search_fields)
             methods.append(f"""public async Task<IList<{name}>> Get{name}sByQuery(string query)
         {{
             return await _context.{name}
@@ -418,10 +423,11 @@ RULES:
 
         methods_str = "\n\n        ".join(methods)
 
-        tasks.append({
-            "task_id": new_id(f"school-svc-{name.lower()}"),
-            "type": "code",
-            "prompt": f"""You are writing a service implementation class for an ASP.NET Core MVC solution.
+        tasks.append(
+            {
+                "task_id": new_id(f"school-svc-{name.lower()}"),
+                "type": "code",
+                "prompt": f"""You are writing a service implementation class for an ASP.NET Core MVC solution.
 
 ARCHITECTURE REFERENCE — follow service implementation pattern exactly:
 {pattern}
@@ -449,8 +455,9 @@ RULES:
 - Output ONLY the C# file. No markdown fences. No explanation.
 - FILES NOT TO TOUCH: BaseService.cs, any interface file, any entity file
 """,
-            "output_file": school_path(sol, f"{sol}.Services", folder, f"{name}Service.cs"),
-        })
+                "output_file": school_path(sol, f"{sol}.Services", folder, f"{name}Service.cs"),
+            }
+        )
 
     return tasks
 
@@ -458,6 +465,7 @@ RULES:
 # ---------------------------------------------------------------------------
 # Stage 4 — Intranet controllers
 # ---------------------------------------------------------------------------
+
 
 def stage_4(domain: dict, arch: dict) -> list[dict]:
     sol = domain["solution"]["name"]
@@ -469,10 +477,11 @@ def stage_4(domain: dict, arch: dict) -> list[dict]:
     tasks = []
 
     # Program.cs
-    tasks.append({
-        "task_id": new_id("school-intranet-program"),
-        "type": "code",
-        "prompt": f"""You are writing Program.cs for an ASP.NET Core MVC Intranet (admin panel) application.
+    tasks.append(
+        {
+            "task_id": new_id("school-intranet-program"),
+            "type": "code",
+            "prompt": f"""You are writing Program.cs for an ASP.NET Core MVC Intranet (admin panel) application.
 
 ARCHITECTURE REFERENCE — follow Firma.Intranet Program.cs pattern exactly:
 {pattern}
@@ -490,14 +499,16 @@ RULES:
 - Output ONLY the C# file. No markdown fences. No explanation.
 - FILES NOT TO TOUCH: any controller or view file
 """,
-        "output_file": school_path(sol, f"{sol}.Intranet", "Program.cs"),
-    })
+            "output_file": school_path(sol, f"{sol}.Intranet", "Program.cs"),
+        }
+    )
 
     # appsettings.json
-    tasks.append({
-        "task_id": new_id("school-intranet-appsettings"),
-        "type": "code",
-        "prompt": f"""Generate appsettings.json for an ASP.NET Core MVC Intranet application.
+    tasks.append(
+        {
+            "task_id": new_id("school-intranet-appsettings"),
+            "type": "code",
+            "prompt": f"""Generate appsettings.json for an ASP.NET Core MVC Intranet application.
 
 Connection string name: "{conn}"
 Database name: "{ctx}"
@@ -506,8 +517,9 @@ Include: Logging (default levels), AllowedHosts: "*"
 
 Output ONLY the JSON. No markdown fences.
 """,
-        "output_file": school_path(sol, f"{sol}.Intranet", "appsettings.json"),
-    })
+            "output_file": school_path(sol, f"{sol}.Intranet", "appsettings.json"),
+        }
+    )
 
     for ent in entities:
         name = ent["name"]
@@ -519,10 +531,11 @@ Output ONLY the JSON. No markdown fences.
 
         if not intranet_crud:
             # Read-only controller (e.g. Inquiry)
-            tasks.append({
-                "task_id": new_id(f"school-intranet-ctrl-{name.lower()}"),
-                "type": "code",
-                "prompt": f"""You are writing a read-only Intranet controller for an ASP.NET Core MVC application.
+            tasks.append(
+                {
+                    "task_id": new_id(f"school-intranet-ctrl-{name.lower()}"),
+                    "type": "code",
+                    "prompt": f"""You are writing a read-only Intranet controller for an ASP.NET Core MVC application.
 
 ARCHITECTURE REFERENCE:
 {pattern}
@@ -547,8 +560,11 @@ RULES:
 - Output ONLY the C# file. No markdown fences. No explanation.
 - FILES NOT TO TOUCH: any other controller, view, or entity file
 """,
-                "output_file": school_path(sol, f"{sol}.Intranet", "Controllers", f"{name}Controller.cs"),
-            })
+                    "output_file": school_path(
+                        sol, f"{sol}.Intranet", "Controllers", f"{name}Controller.cs"
+                    ),
+                }
+            )
         else:
             bind_fields = [pk] + [f["name"] for f in fields]
             if fk_parent:
@@ -566,12 +582,17 @@ FK relationship: {name} belongs to {fk_parent}
 - Edit POST on failure: repopulate ViewData["Id{fk_parent}"]"""
 
             bool_fields = [f["name"] for f in fields if f["type"] == "bool"]
-            bool_note = f"Has boolean field(s): {', '.join(bool_fields)} — Intranet Create/Edit will need checkbox input." if bool_fields else ""
+            bool_note = (
+                f"Has boolean field(s): {', '.join(bool_fields)} — Intranet Create/Edit will need checkbox input."
+                if bool_fields
+                else ""
+            )
 
-            tasks.append({
-                "task_id": new_id(f"school-intranet-ctrl-{name.lower()}"),
-                "type": "code",
-                "prompt": f"""You are writing a full CRUD controller for an ASP.NET Core MVC Intranet (admin panel) application.
+            tasks.append(
+                {
+                    "task_id": new_id(f"school-intranet-ctrl-{name.lower()}"),
+                    "type": "code",
+                    "prompt": f"""You are writing a full CRUD controller for an ASP.NET Core MVC Intranet (admin panel) application.
 
 ARCHITECTURE REFERENCE — follow TowarController or AktualnoscController pattern exactly:
 {pattern}
@@ -606,8 +627,11 @@ RULES:
 - Output ONLY the C# file. No markdown fences. No explanation.
 - FILES NOT TO TOUCH: any other controller, view, or entity file
 """,
-                "output_file": school_path(sol, f"{sol}.Intranet", "Controllers", f"{name}Controller.cs"),
-            })
+                    "output_file": school_path(
+                        sol, f"{sol}.Intranet", "Controllers", f"{name}Controller.cs"
+                    ),
+                }
+            )
 
     return tasks
 
@@ -615,6 +639,7 @@ RULES:
 # ---------------------------------------------------------------------------
 # Stage 5 — Intranet views (W1, batched)
 # ---------------------------------------------------------------------------
+
 
 def stage_5(domain: dict, arch: dict) -> list[dict]:
     sol = domain["solution"]["name"]
@@ -627,15 +652,14 @@ def stage_5(domain: dict, arch: dict) -> list[dict]:
     domains = {}
     for e in entities:
         domains.setdefault(e["domain"], []).append(e["name"])
-    nav_groups = "\n".join(
-        f"  {d}: {', '.join(names)}" for d, names in domains.items()
-    )
+    nav_groups = "\n".join(f"  {d}: {', '.join(names)}" for d, names in domains.items())
 
     # Intranet CSS — standalone file, no Bootstrap
-    tasks.append({
-        "task_id": new_id("school-intranet-css"),
-        "type": "write",
-        "prompt": f"""Write a complete custom CSS file for {ns}.Intranet — an admin panel application.
+    tasks.append(
+        {
+            "task_id": new_id("school-intranet-css"),
+            "type": "write",
+            "prompt": f"""Write a complete custom CSS file for {ns}.Intranet — an admin panel application.
 
 This is the ONLY stylesheet. No Bootstrap, no CDN. All layout and styling must be defined here.
 
@@ -659,14 +683,16 @@ Requirements:
 
 Output ONLY the CSS — no explanations, no markdown fences. Output preceded by: // FILE: wwwroot/css/site.css
 """,
-        "output_file": school_path(sol, f"{sol}.Intranet", "wwwroot", "css", "site.css"),
-    })
+            "output_file": school_path(sol, f"{sol}.Intranet", "wwwroot", "css", "site.css"),
+        }
+    )
 
     # Shared layout + _ViewImports + _ViewStart
-    tasks.append({
-        "task_id": new_id("school-intranet-shared"),
-        "type": "write",
-        "prompt": f"""You are writing shared Razor files for an ASP.NET Core MVC Intranet (admin panel) application.
+    tasks.append(
+        {
+            "task_id": new_id("school-intranet-shared"),
+            "type": "write",
+            "prompt": f"""You are writing shared Razor files for an ASP.NET Core MVC Intranet (admin panel) application.
 
 ARCHITECTURE REFERENCE — follow Intranet view patterns exactly:
 {pattern}
@@ -700,8 +726,9 @@ RULES:
 - Output each file preceded by a line: // FILE: <path>
 - No hardcoded display strings — any text that appears in UI uses variables or is structural UI chrome
 """,
-        "output_file": school_path(sol, f"{sol}.Intranet", "Views", "Shared", "_Layout.cshtml"),
-    })
+            "output_file": school_path(sol, f"{sol}.Intranet", "Views", "Shared", "_Layout.cshtml"),
+        }
+    )
 
     # Per-entity view batches
     for ent in entities:
@@ -725,14 +752,17 @@ RULES:
         bool_fields = [f["name"] for f in fields if f["type"] == "bool"]
 
         if not intranet_crud:
-            views_needed = "Index.cshtml and Details.cshtml only (read-only — no Create/Edit/Delete)"
+            views_needed = (
+                "Index.cshtml and Details.cshtml only (read-only — no Create/Edit/Delete)"
+            )
         else:
             views_needed = "Index.cshtml, Create.cshtml, Edit.cshtml, Details.cshtml, Delete.cshtml"
 
-        tasks.append({
-            "task_id": new_id(f"school-intranet-views-{name.lower()}"),
-            "type": "write",
-            "prompt": f"""You are writing Razor CRUD views for the {name} entity in an ASP.NET Core MVC Intranet application.
+        tasks.append(
+            {
+                "task_id": new_id(f"school-intranet-views-{name.lower()}"),
+                "type": "write",
+                "prompt": f"""You are writing Razor CRUD views for the {name} entity in an ASP.NET Core MVC Intranet application.
 
 ARCHITECTURE REFERENCE — follow Intranet view patterns exactly:
 {pattern}
@@ -758,8 +788,9 @@ RULES for all views:
 - Details.cshtml uses custom CSS .card layout with dl/dt/dd
 - Output each file preceded by: // FILE: Views/{name}/<filename>
 """,
-            "output_file": school_path(sol, f"{sol}.Intranet", "Views", name, "Index.cshtml"),
-        })
+                "output_file": school_path(sol, f"{sol}.Intranet", "Views", name, "Index.cshtml"),
+            }
+        )
 
     return tasks
 
@@ -767,6 +798,7 @@ RULES for all views:
 # ---------------------------------------------------------------------------
 # Stage 6 — Portal controllers + DI factory
 # ---------------------------------------------------------------------------
+
 
 def stage_6(domain: dict, arch: dict) -> list[dict]:
     sol = domain["solution"]["name"]
@@ -784,10 +816,11 @@ def stage_6(domain: dict, arch: dict) -> list[dict]:
     viewcomp_applies = additional.get("D", {}).get("applies_to_controllers", [])
 
     # Program.cs
-    tasks.append({
-        "task_id": new_id("school-portal-program"),
-        "type": "code",
-        "prompt": f"""You are writing Program.cs for an ASP.NET Core MVC PortalWWW (public-facing) application.
+    tasks.append(
+        {
+            "task_id": new_id("school-portal-program"),
+            "type": "code",
+            "prompt": f"""You are writing Program.cs for an ASP.NET Core MVC PortalWWW (public-facing) application.
 
 ARCHITECTURE REFERENCE — follow Firma.PortalWWW Program.cs pattern exactly:
 {pattern}
@@ -805,8 +838,9 @@ RULES:
 - Standard MVC middleware pipeline
 - Output ONLY the C# file. No markdown fences. No explanation.
 """,
-        "output_file": school_path(sol, f"{sol}.PortalWWW", "Program.cs"),
-    })
+            "output_file": school_path(sol, f"{sol}.PortalWWW", "Program.cs"),
+        }
+    )
 
     # DependencyInjectionFactory
     scoped = "\n            ".join(
@@ -814,17 +848,30 @@ RULES:
         for e in portal_entities
         if e.get("intranet_crud", True)  # Inquiry service not needed (direct context write)
     )
-    svc_usings_iface = "\n".join(sorted({
-        f"using {ns}.Interfaces.{e['domain']};" for e in portal_entities if e.get("intranet_crud", True)
-    }))
-    svc_usings_impl = "\n".join(sorted({
-        f"using {ns}.Services.{e['domain']};" for e in portal_entities if e.get("intranet_crud", True)
-    }))
+    svc_usings_iface = "\n".join(
+        sorted(
+            {
+                f"using {ns}.Interfaces.{e['domain']};"
+                for e in portal_entities
+                if e.get("intranet_crud", True)
+            }
+        )
+    )
+    svc_usings_impl = "\n".join(
+        sorted(
+            {
+                f"using {ns}.Services.{e['domain']};"
+                for e in portal_entities
+                if e.get("intranet_crud", True)
+            }
+        )
+    )
 
-    tasks.append({
-        "task_id": new_id("school-portal-di"),
-        "type": "code",
-        "prompt": f"""You are writing DependencyInjectionFactory.cs for an ASP.NET Core MVC PortalWWW application.
+    tasks.append(
+        {
+            "task_id": new_id("school-portal-di"),
+            "type": "code",
+            "prompt": f"""You are writing DependencyInjectionFactory.cs for an ASP.NET Core MVC PortalWWW application.
 
 ARCHITECTURE REFERENCE — follow DependencyInjectionFactory pattern exactly:
 {pattern}
@@ -846,22 +893,25 @@ RULES:
 - AddScoped<IXxxService, XxxService>() for each service
 - Output ONLY the C# file. No markdown fences. No explanation.
 """,
-        "output_file": school_path(sol, f"{sol}.PortalWWW", "DependencyInjectionFactory.cs"),
-    })
+            "output_file": school_path(sol, f"{sol}.PortalWWW", "DependencyInjectionFactory.cs"),
+        }
+    )
 
     # appsettings.json
-    tasks.append({
-        "task_id": new_id("school-portal-appsettings"),
-        "type": "code",
-        "prompt": f"""Generate appsettings.json for an ASP.NET Core MVC PortalWWW application.
+    tasks.append(
+        {
+            "task_id": new_id("school-portal-appsettings"),
+            "type": "code",
+            "prompt": f"""Generate appsettings.json for an ASP.NET Core MVC PortalWWW application.
 Connection string name: "{conn}"
 Database name: "{ctx}"
 Server: (localdb)\\mssqllocaldb
 Include: Logging (default levels), AllowedHosts: "*"
 Output ONLY the JSON. No markdown fences.
 """,
-        "output_file": school_path(sol, f"{sol}.PortalWWW", "appsettings.json"),
-    })
+            "output_file": school_path(sol, f"{sol}.PortalWWW", "appsettings.json"),
+        }
+    )
 
     # HomeController
     featured_line = ""
@@ -873,10 +923,11 @@ Output ONLY the JSON. No markdown fences.
         featured_inject = f", I{ent_name}Service _{ent_name[0].lower() + ent_name[1:]}Service"
         featured_line = f"ViewBag.{vbkey} = await _{ent_name[0].lower() + ent_name[1:]}Service.GetHighlighted{ent_name}s();"
 
-    tasks.append({
-        "task_id": new_id("school-portal-ctrl-home"),
-        "type": "code",
-        "prompt": f"""You are writing HomeController for an ASP.NET Core MVC PortalWWW application.
+    tasks.append(
+        {
+            "task_id": new_id("school-portal-ctrl-home"),
+            "type": "code",
+            "prompt": f"""You are writing HomeController for an ASP.NET Core MVC PortalWWW application.
 
 ARCHITECTURE REFERENCE — follow PortalWWW HomeController pattern exactly:
 {pattern}
@@ -886,32 +937,33 @@ File to create: {ns}.PortalWWW/Controllers/HomeController.cs
 Namespace: {ns}.PortalWWW.Controllers
 
 Constructor injects:
-- I{pages_ent['name']}Service _pageService
-- I{news_ent['name']}Service _newsService
+- I{pages_ent["name"]}Service _pageService
+- I{news_ent["name"]}Service _newsService
 {featured_inject}
 
 Index(int? id) action:
-- ViewBag.ModelPages = await _pageService.Get{pages_ent['name']}s()
+- ViewBag.ModelPages = await _pageService.Get{pages_ent["name"]}s()
 - ViewBag.ModelNews = await _newsService.GetNewsItems(3)   // or GetNewsItemsByPositionTake(3)
 - {featured_line}
 - if id == null → id = 1
-- var page = await _pageService.Get{pages_ent['name']}(id)
+- var page = await _pageService.Get{pages_ent["name"]}(id)
 - return View(page)
 
 RULES:
 - Every action must populate ViewBag.ModelPages and ViewBag.ModelNews before returning
 - Output ONLY the C# file. No markdown fences. No explanation.
 """,
-        "output_file": school_path(sol, f"{sol}.PortalWWW", "Controllers", "HomeController.cs"),
-    })
+            "output_file": school_path(sol, f"{sol}.PortalWWW", "Controllers", "HomeController.cs"),
+        }
+    )
 
     # Per-entity Portal controllers (skip CMS entities — handled by Home/News controllers)
     for ent in portal_entities:
         name = ent["name"]
-        folder = ent["domain"]
+        ent["domain"]
         pk = ent["pk"]
         pk_param = pk[0].lower() + pk[1:]
-        fk_parent = ent.get("fk_parent")
+        ent.get("fk_parent")
         intranet_crud = ent.get("intranet_crud", True)
         cms_role = ent.get("cms_role")
         svc_var = f"_{name[0].lower() + name[1:]}Service"
@@ -921,10 +973,11 @@ RULES:
 
         if cms_role == "news":
             # Simple news controller
-            tasks.append({
-                "task_id": new_id("school-portal-ctrl-news"),
-                "type": "code",
-                "prompt": f"""You are writing a NewsController for an ASP.NET Core MVC PortalWWW application.
+            tasks.append(
+                {
+                    "task_id": new_id("school-portal-ctrl-news"),
+                    "type": "code",
+                    "prompt": f"""You are writing a NewsController for an ASP.NET Core MVC PortalWWW application.
 
 ARCHITECTURE REFERENCE — follow AktualnoscController pattern exactly:
 {pattern}
@@ -935,10 +988,10 @@ Namespace: {ns}.PortalWWW.Controllers
 
 Constructor injects:
 - I{name}Service {svc_var}
-- I{pages_ent['name']}Service _pageService
+- I{pages_ent["name"]}Service _pageService
 
 Index(int id) action:
-- ViewBag.ModelPages = await _pageService.Get{pages_ent['name']}s()
+- ViewBag.ModelPages = await _pageService.Get{pages_ent["name"]}s()
 - ViewBag.ModelNews = await {svc_var}.Get{name}s()
 - var item = await {svc_var}.Get{name}(id)
 - if item == null → NotFound()
@@ -949,8 +1002,11 @@ RULES:
 - Inject service interfaces only — never {ctx} directly
 - Output ONLY the C# file. No markdown fences. No explanation.
 """,
-                "output_file": school_path(sol, f"{sol}.PortalWWW", "Controllers", "NewsController.cs"),
-            })
+                    "output_file": school_path(
+                        sol, f"{sol}.PortalWWW", "Controllers", "NewsController.cs"
+                    ),
+                }
+            )
             continue
 
         uses_agents_layout = name in viewcomp_applies
@@ -965,10 +1021,11 @@ RULES:
             # Contact form (Inquiry)
             bind_fields = [pk] + [f["name"] for f in ent["fields"]]
             bind_str = ",".join(bind_fields)
-            tasks.append({
-                "task_id": new_id(f"school-portal-ctrl-{name.lower()}"),
-                "type": "code",
-                "prompt": f"""You are writing a contact form controller for an ASP.NET Core MVC PortalWWW application.
+            tasks.append(
+                {
+                    "task_id": new_id(f"school-portal-ctrl-{name.lower()}"),
+                    "type": "code",
+                    "prompt": f"""You are writing a contact form controller for an ASP.NET Core MVC PortalWWW application.
 
 ARCHITECTURE REFERENCE — follow PortalWWW controller + Zapytanie pattern:
 {pattern}
@@ -978,8 +1035,8 @@ File to create: {ns}.PortalWWW/Controllers/{name}Controller.cs
 Namespace: {ns}.PortalWWW.Controllers
 
 Constructor injects:
-- I{pages_ent['name']}Service _pageService
-- I{news_ent['name']}Service _newsService
+- I{pages_ent["name"]}Service _pageService
+- I{news_ent["name"]}Service _newsService
 - {ctx} _context  (direct write — Inquiry is the one Portal write exception)
 
 Actions:
@@ -997,14 +1054,17 @@ RULES:
 - Every action populates ViewBag.ModelPages and ViewBag.ModelNews
 - Output ONLY the C# file. No markdown fences. No explanation.
 """,
-                "output_file": school_path(sol, f"{sol}.PortalWWW", "Controllers", f"{name}Controller.cs"),
-            })
+                    "output_file": school_path(
+                        sol, f"{sol}.PortalWWW", "Controllers", f"{name}Controller.cs"
+                    ),
+                }
+            )
         else:
             layout_note = (
-                f"This controller's views use _AgentsLayout.cshtml (ViewComponent handles sidebar).\n"
-                f"Do NOT populate ViewBag.ModelPages / ViewBag.ModelNews in Index — not needed for this layout."
-                if uses_agents_layout else
-                "Every action must populate ViewBag.ModelPages and ViewBag.ModelNews before returning."
+                "This controller's views use _AgentsLayout.cshtml (ViewComponent handles sidebar).\n"
+                "Do NOT populate ViewBag.ModelPages / ViewBag.ModelNews in Index — not needed for this layout."
+                if uses_agents_layout
+                else "Every action must populate ViewBag.ModelPages and ViewBag.ModelNews before returning."
             )
             search_param = "string? searchQuery = null" if has_search else ""
             search_logic = (
@@ -1015,8 +1075,8 @@ RULES:
         else
             items = await {svc_var}.Get{name}s();
         ViewBag.SearchQuery = searchQuery;"""
-                if has_search else
-                f"\n        var items = await {svc_var}.Get{name}s();"
+                if has_search
+                else f"\n        var items = await {svc_var}.Get{name}s();"
             )
             inject_lines = [f"I{name}Service {svc_var}"]
             if not uses_agents_layout:
@@ -1025,10 +1085,11 @@ RULES:
                     f"I{news_ent['name']}Service _newsService",
                 ]
 
-            tasks.append({
-                "task_id": new_id(f"school-portal-ctrl-{name.lower()}"),
-                "type": "code",
-                "prompt": f"""You are writing a Portal controller for an ASP.NET Core MVC PortalWWW application.
+            tasks.append(
+                {
+                    "task_id": new_id(f"school-portal-ctrl-{name.lower()}"),
+                    "type": "code",
+                    "prompt": f"""You are writing a Portal controller for an ASP.NET Core MVC PortalWWW application.
 
 ARCHITECTURE REFERENCE — follow PortalWWW controller pattern exactly:
 {pattern}
@@ -1038,7 +1099,7 @@ File to create: {ns}.PortalWWW/Controllers/{name}Controller.cs
 Namespace: {ns}.PortalWWW.Controllers
 
 Constructor injects:
-- {chr(10).join("- " + l for l in inject_lines)}
+- {chr(10).join("- " + line for line in inject_lines)}
 
 Index({search_param}) action:{search_logic}
     return View(items)
@@ -1056,8 +1117,11 @@ RULES:
 - Output ONLY the C# file. No markdown fences. No explanation.
 - FILES NOT TO TOUCH: any other controller, DI factory, or view file
 """,
-                "output_file": school_path(sol, f"{sol}.PortalWWW", "Controllers", f"{name}Controller.cs"),
-            })
+                    "output_file": school_path(
+                        sol, f"{sol}.PortalWWW", "Controllers", f"{name}Controller.cs"
+                    ),
+                }
+            )
 
     # ViewComponent class
     if "D" in additional:
@@ -1065,10 +1129,11 @@ RULES:
         comp_name = d["component_name"]
         comp_ent = d["entity"]
         comp_svc_var = f"_{comp_ent[0].lower() + comp_ent[1:]}Service"
-        tasks.append({
-            "task_id": new_id("school-portal-viewcomp"),
-            "type": "code",
-            "prompt": f"""You are writing a ViewComponent class for an ASP.NET Core MVC PortalWWW application.
+        tasks.append(
+            {
+                "task_id": new_id("school-portal-viewcomp"),
+                "type": "code",
+                "prompt": f"""You are writing a ViewComponent class for an ASP.NET Core MVC PortalWWW application.
 
 ARCHITECTURE REFERENCE — follow RodzajeMenuComponent pattern exactly:
 {pattern}
@@ -1088,8 +1153,11 @@ RULES:
 - InvokeAsync returns Task<IViewComponentResult>
 - Output ONLY the C# file. No markdown fences. No explanation.
 """,
-            "output_file": school_path(sol, f"{sol}.PortalWWW", "Controllers", f"{comp_name}.cs"),
-        })
+                "output_file": school_path(
+                    sol, f"{sol}.PortalWWW", "Controllers", f"{comp_name}.cs"
+                ),
+            }
+        )
 
     return tasks
 
@@ -1097,6 +1165,7 @@ RULES:
 # ---------------------------------------------------------------------------
 # Stage 7 — Portal views (W1, batched)
 # ---------------------------------------------------------------------------
+
 
 def stage_7(domain: dict, arch: dict) -> list[dict]:
     sol = domain["solution"]["name"]
@@ -1110,13 +1179,16 @@ def stage_7(domain: dict, arch: dict) -> list[dict]:
     news_ent = next((e for e in entities if e.get("cms_role") == "news"), None)
     portal_entities = [e for e in entities if e.get("portal_exposed") and not e.get("cms_role")]
     viewcomp_name = additional.get("D", {}).get("component_name") if "D" in additional else None
-    viewcomp_applies = additional.get("D", {}).get("applies_to_controllers", []) if "D" in additional else []
+    viewcomp_applies = (
+        additional.get("D", {}).get("applies_to_controllers", []) if "D" in additional else []
+    )
 
     # Portal CSS — standalone file, separate from Intranet
-    tasks.append({
-        "task_id": new_id("school-portal-css"),
-        "type": "write",
-        "prompt": f"""Write a complete custom CSS file for {ns}.PortalWWW — a public-facing freelance agent marketplace portal.
+    tasks.append(
+        {
+            "task_id": new_id("school-portal-css"),
+            "type": "write",
+            "prompt": f"""Write a complete custom CSS file for {ns}.PortalWWW — a public-facing freelance agent marketplace portal.
 
 This is the ONLY stylesheet. No Bootstrap, no CDN. Visually distinct from the admin Intranet.
 
@@ -1145,14 +1217,16 @@ Requirements:
 
 Output ONLY the CSS — no explanations, no markdown fences. Output preceded by: // FILE: wwwroot/css/site.css
 """,
-        "output_file": school_path(sol, f"{sol}.PortalWWW", "wwwroot", "css", "site.css"),
-    })
+            "output_file": school_path(sol, f"{sol}.PortalWWW", "wwwroot", "css", "site.css"),
+        }
+    )
 
     # Layouts + partials
-    tasks.append({
-        "task_id": new_id("school-portal-layouts"),
-        "type": "write",
-        "prompt": f"""You are writing shared layouts and partial views for an ASP.NET Core MVC PortalWWW application.
+    tasks.append(
+        {
+            "task_id": new_id("school-portal-layouts"),
+            "type": "write",
+            "prompt": f"""You are writing shared layouts and partial views for an ASP.NET Core MVC PortalWWW application.
 
 ARCHITECTURE REFERENCE — follow Firma.PortalWWW layout patterns exactly:
 {pattern}
@@ -1161,8 +1235,8 @@ Create these files for {ns}.PortalWWW:
 
 FILE: Views/Shared/_Layout.cshtml
 - Custom CSS responsive layout (site.css — no Bootstrap), app name "AgentHire Portal"
-- Dynamic navbar: @await Html.PartialAsync("PagesPartial", (IEnumerable<{ns}.Data.Data.CMS.{pages_ent['name']}>)ViewBag.ModelPages)
-- News sidebar: @await Html.PartialAsync("NewsPartial", (IEnumerable<{ns}.Data.Data.CMS.{news_ent['name']}>)ViewBag.ModelNews)
+- Dynamic navbar: @await Html.PartialAsync("PagesPartial", (IEnumerable<{ns}.Data.Data.CMS.{pages_ent["name"]}>)ViewBag.ModelPages)
+- News sidebar: @await Html.PartialAsync("NewsPartial", (IEnumerable<{ns}.Data.Data.CMS.{news_ent["name"]}>)ViewBag.ModelNews)
 - @RenderBody() and @RenderSection("Scripts", required: false)
 
 FILE: Views/Shared/_AgentsLayout.cshtml
@@ -1172,12 +1246,12 @@ FILE: Views/Shared/_AgentsLayout.cshtml
 - Custom CSS 2-column grid: sidebar 25% / content 75% using flexbox (site.css .layout-sidebar)
 
 FILE: Views/Shared/PagesPartial.cshtml
-- @model IEnumerable<{ns}.Data.Data.CMS.{pages_ent['name']}>
-- Renders nav links: asp-controller="Home" asp-action="Index" asp-route-id="@item.{pages_ent['pk']}"
+- @model IEnumerable<{ns}.Data.Data.CMS.{pages_ent["name"]}>
+- Renders nav links: asp-controller="Home" asp-action="Index" asp-route-id="@item.{pages_ent["pk"]}"
 - Text: @item.NavTitle
 
 FILE: Views/Shared/NewsPartial.cshtml
-- @model IEnumerable<{ns}.Data.Data.CMS.{news_ent['name']}>
+- @model IEnumerable<{ns}.Data.Data.CMS.{news_ent["name"]}>
 - Compact news list with title and link
 
 FILE: _ViewImports.cshtml (project root)
@@ -1192,24 +1266,34 @@ RULES:
 - Custom CSS throughout (wwwroot/css/site.css — no Bootstrap CDN). No hardcoded display strings.
 - Output each file preceded by: // FILE: <path>
 """,
-        "output_file": school_path(sol, f"{sol}.PortalWWW", "Views", "Shared", "_Layout.cshtml"),
-    })
+            "output_file": school_path(
+                sol, f"{sol}.PortalWWW", "Views", "Shared", "_Layout.cshtml"
+            ),
+        }
+    )
 
     # Home page (hero + featured agents)
     featured_ent = additional.get("G", {}).get("entity") if "G" in additional else None
-    featured_vbkey = additional.get("G", {}).get("homepage_viewbag_key", "FeaturedAgents") if "G" in additional else None
-    featured_type = next((e for e in entities if e["name"] == featured_ent), None) if featured_ent else None
+    featured_vbkey = (
+        additional.get("G", {}).get("homepage_viewbag_key", "FeaturedAgents")
+        if "G" in additional
+        else None
+    )
+    featured_type = (
+        next((e for e in entities if e["name"] == featured_ent), None) if featured_ent else None
+    )
 
-    tasks.append({
-        "task_id": new_id("school-portal-views-home"),
-        "type": "write",
-        "prompt": f"""You are writing the home page view for an ASP.NET Core MVC PortalWWW application.
+    tasks.append(
+        {
+            "task_id": new_id("school-portal-views-home"),
+            "type": "write",
+            "prompt": f"""You are writing the home page view for an ASP.NET Core MVC PortalWWW application.
 
 ARCHITECTURE REFERENCE:
 {pattern}
 
 FILE: Views/Home/Index.cshtml
-@model {ns}.Data.Data.CMS.{pages_ent['name']}  (main page content)
+@model {ns}.Data.Data.CMS.{pages_ent["name"]}  (main page content)
 
 Sections:
 1. Hero / banner
@@ -1227,8 +1311,9 @@ RULES:
 - Custom CSS (wwwroot/css/site.css — no Bootstrap)
 - Output ONLY the view content preceded by: // FILE: Views/Home/Index.cshtml
 """,
-        "output_file": school_path(sol, f"{sol}.PortalWWW", "Views", "Home", "Index.cshtml"),
-    })
+            "output_file": school_path(sol, f"{sol}.PortalWWW", "Views", "Home", "Index.cshtml"),
+        }
+    )
 
     # Per-entity portal views
     for ent in portal_entities:
@@ -1247,19 +1332,20 @@ RULES:
         fields_desc = "\n".join(f"  - {f['name']} ({f['type']})" for f in fields)
 
         layout_note = (
-            f'Use _AgentsLayout: declare @{{ Layout = "~/Views/Shared/_AgentsLayout.cshtml"; }} at top of each view.'
-            if uses_agents_layout else
-            "Uses default _Layout.cshtml (no layout declaration needed)."
+            'Use _AgentsLayout: declare @{ Layout = "~/Views/Shared/_AgentsLayout.cshtml"; } at top of each view.'
+            if uses_agents_layout
+            else "Uses default _Layout.cshtml (no layout declaration needed)."
         )
 
         if not intranet_crud:
             # Contact form
             form_fields = [f for f in fields if f["name"] not in [pk, "SubmittedAt"]]
             form_desc = "\n".join(f"  - {f['name']}: {f['type']}" for f in form_fields)
-            tasks.append({
-                "task_id": new_id(f"school-portal-views-{name.lower()}"),
-                "type": "write",
-                "prompt": f"""You are writing the contact form view for an ASP.NET Core MVC PortalWWW application.
+            tasks.append(
+                {
+                    "task_id": new_id(f"school-portal-views-{name.lower()}"),
+                    "type": "write",
+                    "prompt": f"""You are writing the contact form view for an ASP.NET Core MVC PortalWWW application.
 
 ARCHITECTURE REFERENCE:
 {pattern}
@@ -1279,18 +1365,23 @@ RULES:
 - No hardcoded text
 - Output ONLY the view preceded by: // FILE: Views/{name}/Index.cshtml
 """,
-                "output_file": school_path(sol, f"{sol}.PortalWWW", "Views", name, "Index.cshtml"),
-            })
+                    "output_file": school_path(
+                        sol, f"{sol}.PortalWWW", "Views", name, "Index.cshtml"
+                    ),
+                }
+            )
         else:
             related_note = (
                 f"\nDetails.cshtml also renders child {child_ent} records below the parent card.\n"
                 f"Children available via @Model.{child_ent} navigation property. Render as custom CSS card grid (.card-grid class)."
-                if has_related and child_ent else ""
+                if has_related and child_ent
+                else ""
             )
-            tasks.append({
-                "task_id": new_id(f"school-portal-views-{name.lower()}"),
-                "type": "write",
-                "prompt": f"""You are writing Portal views for the {name} entity in an ASP.NET Core MVC PortalWWW application.
+            tasks.append(
+                {
+                    "task_id": new_id(f"school-portal-views-{name.lower()}"),
+                    "type": "write",
+                    "prompt": f"""You are writing Portal views for the {name} entity in an ASP.NET Core MVC PortalWWW application.
 
 ARCHITECTURE REFERENCE — follow PortalWWW view patterns exactly:
 {pattern}
@@ -1316,8 +1407,11 @@ RULES:
 - Custom CSS (wwwroot/css/site.css — no Bootstrap). No hardcoded display strings.
 - Output each file preceded by: // FILE: Views/{name}/<filename>
 """,
-                "output_file": school_path(sol, f"{sol}.PortalWWW", "Views", name, "Index.cshtml"),
-            })
+                    "output_file": school_path(
+                        sol, f"{sol}.PortalWWW", "Views", name, "Index.cshtml"
+                    ),
+                }
+            )
 
     # ViewComponent template
     if "D" in additional:
@@ -1327,10 +1421,11 @@ RULES:
         comp_ent_obj = next((e for e in entities if e["name"] == comp_ent), None)
         comp_folder = comp_ent_obj["domain"] if comp_ent_obj else "Agents"
 
-        tasks.append({
-            "task_id": new_id("school-portal-viewcomp-template"),
-            "type": "write",
-            "prompt": f"""You are writing a ViewComponent Razor template for an ASP.NET Core MVC PortalWWW application.
+        tasks.append(
+            {
+                "task_id": new_id("school-portal-viewcomp-template"),
+                "type": "write",
+                "prompt": f"""You are writing a ViewComponent Razor template for an ASP.NET Core MVC PortalWWW application.
 
 ARCHITECTURE REFERENCE — follow RodzajeMenuComponent template pattern exactly:
 {pattern}
@@ -1349,12 +1444,17 @@ RULES:
 - No hardcoded text
 - Output ONLY the view preceded by: // FILE: Views/Agent/Components/{comp_name}/{comp_name}.cshtml
 """,
-            "output_file": school_path(
-                sol,
-                f"{sol}.PortalWWW", "Views", "Agent",
-                "Components", comp_name, f"{comp_name}.cshtml"
-            ),
-        })
+                "output_file": school_path(
+                    sol,
+                    f"{sol}.PortalWWW",
+                    "Views",
+                    "Agent",
+                    "Components",
+                    comp_name,
+                    f"{comp_name}.cshtml",
+                ),
+            }
+        )
 
     return tasks
 
@@ -1380,8 +1480,9 @@ def main() -> None:
     )
     parser.add_argument("--config", required=True, help="Path to domain.yaml")
     parser.add_argument(
-        "--stage", required=True,
-        help="Stage number 1-7, or 'all' to generate everything at once (not recommended)"
+        "--stage",
+        required=True,
+        help="Stage number 1-7, or 'all' to generate everything at once (not recommended)",
     )
     parser.add_argument("--dry-run", action="store_true", help="List tasks without writing files")
     args = parser.parse_args()
@@ -1431,9 +1532,8 @@ def main() -> None:
     VIEW_STAGES = {5, 7}
     stage_set = set(stage_nums)
     if not args.dry_run and stage_set & VIEW_STAGES:
-        import subprocess, sys as _sys
         sol = domain["solution"]["name"]
-        split_script = Path(__file__).parent / "split_views.py"
+        Path(__file__).parent / "split_views.py"
         for n in sorted(stage_set & VIEW_STAGES):
             proj = "Intranet" if n == 5 else "PortalWWW"
             proj_path = config_path.parent / sol / f"{sol}.{proj}"

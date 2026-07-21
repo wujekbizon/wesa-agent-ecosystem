@@ -6,8 +6,10 @@ System prompt is injected per-agent from skill YAML files.
 """
 
 import os
+
 import requests
 from dotenv import load_dotenv
+
 from src.mcp_client import MCPClient
 
 load_dotenv()
@@ -121,11 +123,13 @@ class OllamaAgent:
                         result_text = "[WARN: MAX_TURNS reached]"
                     break
 
-                messages.append({
-                    "role": "assistant",
-                    "content": message.get("content", ""),
-                    "tool_calls": tool_calls,
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": message.get("content", ""),
+                        "tool_calls": tool_calls,
+                    }
+                )
 
                 for tc in tool_calls:
                     fn = tc.get("function", {})
@@ -133,6 +137,7 @@ class OllamaAgent:
                     arguments = fn.get("arguments", {})
                     if isinstance(arguments, str):
                         import json
+
                         try:
                             arguments = json.loads(arguments)
                         except Exception:
@@ -153,4 +158,3 @@ class OllamaAgent:
     @property
     def model_name(self) -> str:
         return f"{self._model} ({self.agent_name})"
-      

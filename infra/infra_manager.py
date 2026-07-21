@@ -8,15 +8,13 @@ Scale up   = replicas 0 → 1  (start)
 Scale down = replicas 1 → 0  (stop)
 """
 
-import os
 import logging
+import os
 from datetime import datetime
-from typing import Optional
 
 import yaml as pyyaml
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 
@@ -45,6 +43,7 @@ except config.ConfigException:
 
 apps_v1 = client.AppsV1Api()
 core_v1 = client.CoreV1Api()
+
 
 # ---------------------------------------------------------------------------
 # Service registry
@@ -101,7 +100,7 @@ def scale_deployment(name: str, replicas: int) -> dict:
         if e.status == 404:
             raise HTTPException(
                 status_code=404,
-                detail=f"Deployment '{name}' not found in namespace '{NAMESPACE}'. Run deploy.sh first."
+                detail=f"Deployment '{name}' not found in namespace '{NAMESPACE}'. Run deploy.sh first.",
             )
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -179,14 +178,16 @@ def list_services():
     for svc_id, meta in services.items():
         dep_name = deployment_name(svc_id, meta)
         status = get_deployment_status(dep_name)
-        result.append({
-            "id": svc_id,
-            "display_name": meta.get("display_name", svc_id),
-            "description": meta.get("description", ""),
-            "port": meta.get("port"),
-            "deployment": dep_name,
-            **status,
-        })
+        result.append(
+            {
+                "id": svc_id,
+                "display_name": meta.get("display_name", svc_id),
+                "description": meta.get("description", ""),
+                "port": meta.get("port"),
+                "deployment": dep_name,
+                **status,
+            }
+        )
     return {"services": result, "count": len(result)}
 
 
@@ -225,7 +226,9 @@ def stop_service(service_name: str):
 def restart_service(service_name: str):
     dep = _resolve_dep(service_name)
     scale_deployment(dep, replicas=0)
-    import time; time.sleep(2)
+    import time
+
+    time.sleep(2)
     return scale_deployment(dep, replicas=1)
 
 
@@ -270,5 +273,6 @@ def get_logs(service_name: str, tail: int = 100):
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.environ.get("PORT", 8766))
     uvicorn.run("infra_manager:app", host="0.0.0.0", port=port, reload=False)

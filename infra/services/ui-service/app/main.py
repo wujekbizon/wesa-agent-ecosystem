@@ -4,16 +4,14 @@ Serves the kids' web interface and acts as BFF (Backend for Frontend).
 Proxies API calls to internal services so kids' browsers only talk to port 3000.
 """
 
-import os
-import json
 import logging
+import os
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 log = logging.getLogger("lumio.ui")
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
@@ -40,6 +38,7 @@ async def root():
 # ---------------------------------------------------------------------------
 # BFF proxy routes — kids' browser never knows about internal ports
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/users")
 async def list_users():
@@ -144,4 +143,5 @@ async def end_session(request: Request):
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 3000)))
