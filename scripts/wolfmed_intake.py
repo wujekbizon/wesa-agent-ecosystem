@@ -225,7 +225,14 @@ def poll_tasks(category: str):
 
         # Step 4: Check for Merge Trigger
         if manifest.get("validated_count", 0) == len(manifest.get("chunks", [])):
-            if manifest.get("merge_status") != "done":
+            # Don't trust merge_status alone — it's a one-way "done" flag that
+            # survives even if the merged output file is later deleted or moved.
+            # Verify the expected output still exists on disk before treating
+            # this manifest as finished; otherwise re-trigger the merge.
+            expected_output = DONE_DIR / f"{manifest.get('category', 'unknown')}_all_merged.json"
+            merge_already_done = manifest.get("merge_status") == "done" and expected_output.exists()
+
+            if not merge_already_done:
                 print(f"All chunks validated for {manifest_path.name}. Triggering merge...")
                 try:
                     merge_book(manifest)

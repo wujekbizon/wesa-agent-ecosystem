@@ -140,8 +140,12 @@ def merge_book(manifest: dict, output_path: Path | None = None, overwrite: bool 
 
                 if "course" not in meta:
                     meta["course"] = "pielegniarstwo"
-                if "category" not in meta:
-                    meta["category"] = category
+                # Always force category to the manifest's category (folder-derived,
+                # authoritative). Extraction/validation prompts sometimes populate
+                # this field with their own topic guess (e.g. "Urazy klatki
+                # piersiowej", "chirurgia") instead of leaving it unset — don't
+                # trust a pre-existing value here.
+                meta["category"] = category
 
                 # 3. Deduplicate by question text
                 q_text = data.get("question", "").strip()
