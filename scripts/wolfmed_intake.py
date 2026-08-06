@@ -62,6 +62,25 @@ def load_manifest(manifest_path: Path) -> dict:
         return json.load(f)
 
 
+def is_valid_json_file(path: Path) -> bool:
+    """Returns True only if path exists, is non-empty, and parses as JSON.
+
+    Worker tasks can mark themselves 'done' while having written an empty or
+    truncated output file (observed: 0-byte *_validated.json with no error
+    recorded). Downstream stages must not trust status=='done' + file-exists
+    alone — that let corrupt chunks silently reach 'validated' and break
+    merge_book() every retry with no way to self-recover.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return False
+    try:
+        with open(path, encoding="utf-8") as f:
+            json.load(f)
+        return True
+    except Exception:
+        return False
+
+
 def get_task_status(task_path: Path) -> str | None:
     """Reads the status field from a task JSON file."""
     if not task_path.exists():
@@ -178,9 +197,28 @@ def poll_tasks(category: str):
                 status = get_task_status(task_path)
 
                 if status == "done":
-                    # Check if output file exists
                     raw_json_path = OUTPUTS_DIR / f"{chunk['id']}_raw.json"
-                    if raw_json_path.exists():
+                    if not is_valid_json_file(raw_json_path):
+                        # Task reported 'done' but output is missing/empty/corrupt.
+                        # Re-issue a fresh extraction task rather than getting stuck
+                        # forever (the original task_id won't rerun on its own).
+                        print(
+                            f"Warning: extraction task {task_id} marked done but "
+                            f"{raw_json_path.name} is missing/invalid. Re-queuing extraction.",
+                            file=sys.stderr,
+                        )
+                        txt_file_path = WESA_DIR / chunk["txt"]
+                        with open(txt_file_path, encoding="utf-8") as f:
+                            content = f.read()
+                        prompt = f"{category}\n{chunk['pages']}\n---\n{content}"
+                        new_task_id = f"wm-ex-{uuid.uuid4().hex[:8]}"
+                        new_task_data = create_task(
+                            "extract_pdf", new_task_id, raw_json_path, prompt
+                        )
+                        atomic_write_json(TASKS_DIR / f"{new_task_id}.json", new_task_data)
+                        chunk["extract_task_id"] = new_task_id
+                        changed = True
+                    else:
                         # Move to validation stage
                         chunk["status"] = "validating"
                         chunk["validate_task_id"] = ""  # placeholder
@@ -215,9 +253,25 @@ def poll_tasks(category: str):
 
                 if status == "done":
                     val_json_path = OUTPUTS_DIR / f"{chunk['id']}_validated.json"
-                    if val_json_path.exists():
+                    if is_valid_json_file(val_json_path):
                         chunk["status"] = "validated"
                         manifest["validated_count"] = manifest.get("validated_count", 0) + 1
+                        changed = True
+                    else:
+                        # Task reported 'done' but output is missing/empty/corrupt
+                        # (seen: 0-byte *_validated.json with no error recorded).
+                        # Drop back to 'queued' — extraction is already done and
+                        # raw_json still exists, so the next pass immediately
+                        # re-issues a fresh validation task instead of leaving
+                        # this chunk permanently stuck (and merge_book crashing
+                        # on every retry once validated_count happens to match).
+                        print(
+                            f"Warning: validation task {task_id} marked done but "
+                            f"{val_json_path.name} is missing/invalid. Re-queuing validation.",
+                            file=sys.stderr,
+                        )
+                        chunk["status"] = "queued"
+                        chunk["validate_task_id"] = ""
                         changed = True
 
         if changed:
