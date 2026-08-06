@@ -46,6 +46,22 @@ except ImportError:
     print("Error: pypdf is not installed. Install it with: pip install pypdf")
     sys.exit(1)
 
+try:
+    import fitz  # PyMuPDF
+except ImportError:
+    print("Error: pymupdf is not installed. Install it with: pip install pymupdf")
+    sys.exit(1)
+
+# Text extraction uses PyMuPDF (fitz), not pypdf. pypdf's extract_text() is
+# still used to split/write the per-chunk PDF files (that only needs page
+# structure, not text decoding), but its text extraction badly mishandles
+# Type3 fonts — common in these Polish medical textbooks for title pages,
+# headers, or in some source files the entire body text — silently emitting
+# mostly '�' replacement characters instead of raising an error. That
+# went undetected through extraction *and* validation (both stages "succeed"
+# on garbage input) and only surfaced when someone read the merged output.
+# PyMuPDF's get_text() decodes the same Type3 glyph programs correctly.
+
 
 # ---------------------------------------------------------------------------
 # Polish medical textbook heuristics — skip-indicator keywords
@@ -86,15 +102,16 @@ def get_page_range_str(start_page: int, end_page: int) -> str:
     return f"{start_page}-{end_page}"
 
 
-def extract_text_from_pages(reader: PdfReader, start_idx: int, end_idx: int) -> str:
-    texts = []
-    for i in range(start_idx, end_idx):
-        try:
-            page = reader.pages[i]
-            text = page.extract_text() or ""
-            texts.append(text)
-        except Exception:
-            texts.append(f"[Page {i + 1} extraction failed]")
+def extract_page_text(fitz_doc: "fitz.Document", page_idx: int) -> str:
+    """Extract text for a single 0-indexed page via PyMuPDF."""
+    try:
+        return fitz_doc[page_idx].get_text() or ""
+    except Exception:
+        return f"[Page {page_idx + 1} extraction failed]"
+
+
+def extract_text_from_pages(fitz_doc: "fitz.Document", start_idx: int, end_idx: int) -> str:
+    texts = [extract_page_text(fitz_doc, i) for i in range(start_idx, end_idx)]
     return "\n".join(texts)
 
 
@@ -165,7 +182,7 @@ def score_page(text: str) -> dict:
 
 
 def detect_content_boundaries(
-    reader: PdfReader,
+    fitz_doc: "fitz.Document",
     start_idx: int,
     end_idx: int,
     window: int = 20,
@@ -188,10 +205,7 @@ def detect_content_boundaries(
     # --- Scan front window ---
     first_content = start_idx  # default: no trim
     for i in range(start_idx, start_idx + scan_front):
-        try:
-            text = reader.pages[i].extract_text() or ""
-        except Exception:
-            text = ""
+        text = extract_page_text(fitz_doc, i)
         result = score_page(text)
         page_num = i + 1
         status = "CONTENT" if result["is_content"] else "SKIP   "
@@ -205,10 +219,7 @@ def detect_content_boundaries(
     # --- Scan back window ---
     last_content = end_idx - 1  # default: no trim
     for i in range(end_idx - 1, end_idx - 1 - scan_back, -1):
-        try:
-            text = reader.pages[i].extract_text() or ""
-        except Exception:
-            text = ""
+        text = extract_page_text(fitz_doc, i)
         result = score_page(text)
         page_num = i + 1
         status = "CONTENT" if result["is_content"] else "SKIP   "
@@ -260,6 +271,7 @@ def chunk_pdf(
 
     reader = PdfReader(str(pdf_path))
     total_pages = len(reader.pages)
+    fitz_doc = fitz.open(str(pdf_path))
 
     print(f"Processing: {pdf_path.name}")
     print(f"Total pages: {total_pages}")
@@ -287,7 +299,7 @@ def chunk_pdf(
     if auto_trim:
         print(f"Auto-trim:   scanning up to {auto_trim_window} pages at each boundary...")
         first_content, last_content = detect_content_boundaries(
-            reader, range_start, range_end, window=auto_trim_window
+            fitz_doc, range_start, range_end, window=auto_trim_window
         )
         skipped_front = first_content - range_start
         skipped_back = (range_end - 1) - last_content
@@ -362,8 +374,15 @@ def chunk_pdf(
         with open(chunk_pdf_path, "wb") as f:
             writer.write(f)
 
-        text_content = extract_text_from_pages(reader, chunk_start_0idx, chunk_end_0idx)
+        text_content = extract_text_from_pages(fitz_doc, chunk_start_0idx, chunk_end_0idx)
         char_count = len(text_content)
+        garbled_ratio = (text_content.count("�") / char_count) if char_count else 0.0
+        if garbled_ratio > 0.05:
+            print(
+                f"  Warning: chunk {chunk_id} is {garbled_ratio:.0%} replacement "
+                f"characters — extraction likely still broken for this page range.",
+                file=sys.stderr,
+            )
 
         with open(chunk_txt_path, "w", encoding="utf-8") as f:
             f.write(text_content)
@@ -393,6 +412,8 @@ def chunk_pdf(
     print("-" * 50)
     print(f"Manifest: {manifest_path}")
     print(f"Chunks:   {category_chunks_dir}")
+
+    fitz_doc.close()
 
     return manifest
 

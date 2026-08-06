@@ -10,6 +10,11 @@ dependencies = [
     "rich>=13.0.0",
     "pyyaml>=6.0.0",
     "pypdf>=4.0.0",
+    # pdf_chunker.py's text extraction (not PDF splitting) uses this, not
+    # pypdf — pypdf's extract_text() mishandles Type3 fonts (common in these
+    # source PDFs for title pages, or in some books the entire body text)
+    # and silently emits mostly '�' replacement chars instead of erroring.
+    "pymupdf>=1.24.0",
     "cryptography>=42.0.0",
     "pydantic-settings>=2.4.0",
     "fastapi>=0.110.0",
