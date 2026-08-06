@@ -1,7 +1,7 @@
 name: FE1
 role: Frontend Expert
 model: gemini
-gemini_model: gemini-3-flash-preview
+gemini_model: gemini-2.5-flash
 task_types:
   - frontend
 

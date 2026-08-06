@@ -1,7 +1,7 @@
 name: QA
 role: Code QA
 model: gemini
-gemini_model: gemini-3-flash-preview
+gemini_model: gemini-2.5-flash
 task_types:
   - code_review
 

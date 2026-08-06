@@ -83,9 +83,21 @@ def validate_entry(entry: dict) -> bool:
         return False
 
 
-def merge_book(manifest: dict, output_path: Path | None = None) -> Path:
+def merge_book(manifest: dict, output_path: Path | None = None, overwrite: bool = False) -> Path:
     """
-    Merges all validated JSON chunks for a book into one clean question bank.
+    Merges all validated JSON chunks for a book into the category's question bank.
+
+    The output file is shared across every book in a category — wolfmed_intake.py
+    triggers this once per book as soon as that book's chunks finish validating, and
+    multiple books in the same category (e.g. promocja-zdrowia's 35 source PDFs)
+    all write into the same `{category}_all_merged.json`. So by default this is
+    additive: existing entries already in the target file are loaded and preserved,
+    and this book's new, deduplicated entries are appended on top.
+
+    Pass overwrite=True to discard whatever is already in the target file and
+    rebuild it from just this book's chunks — manual recovery / full-category-reset
+    only, NOT the normal per-book path (it will drop every other book already merged
+    into that file).
     """
     initialize_db()
     category = manifest.get("category", "unknown")
@@ -95,10 +107,17 @@ def merge_book(manifest: dict, output_path: Path | None = None) -> Path:
     DONE_DIR.mkdir(parents=True, exist_ok=True)
 
     target_output = output_path or (DONE_DIR / f"{category}_all_merged.json")
-    if target_output.exists():
-        raise FileExistsError(
-            f"Output file already exists: {target_output}. Use --overwrite to replace."
-        )
+
+    all_entries = []
+    seen_questions = set()  # For deduplication by text
+
+    if target_output.exists() and not overwrite:
+        with open(target_output, encoding="utf-8") as f:
+            all_entries = json.load(f)
+        for existing_entry in all_entries:
+            q_norm = existing_entry.get("data", {}).get("question", "").strip().lower()
+            if q_norm:
+                seen_questions.add(q_norm)
 
     # 1. Load all *_validated.json files
     pattern = f"{book_name}_page_*_validated.json"
@@ -106,9 +125,6 @@ def merge_book(manifest: dict, output_path: Path | None = None) -> Path:
 
     if not input_files:
         raise FileNotFoundError(f"No validated chunks found in {OUTPUTS_DIR} matching {pattern}")
-
-    all_entries = []
-    seen_questions = set()  # For deduplication by text
 
     conn = get_db_connection()
 
@@ -190,7 +206,14 @@ if __name__ == "__main__":
         "--manifest", type=Path, required=True, help="Path to the book manifest JSON"
     )
     parser.add_argument(
-        "--overwrite", action="store_true", help="Overwrite existing output if present"
+        "--overwrite",
+        action="store_true",
+        help=(
+            "Discard existing entries in the category's merged output and rebuild it "
+            "from only this book's chunks. Default behavior (no flag) is additive — "
+            "safe to run per-book, preserves every other book already merged into the "
+            "same category file. Only use this for a deliberate full-category reset."
+        ),
     )
 
     args = parser.parse_args()
@@ -205,9 +228,7 @@ if __name__ == "__main__":
         with open(args.manifest, encoding="utf-8") as f:
             manifest_data = json.load(f)
 
-        # Handle overwrite logic for the function call
-        # Note: The function itself raises error if exists, so we handle it here
-        result_path = merge_book(manifest_data)
+        result_path = merge_book(manifest_data, overwrite=args.overwrite)
 
         # Update the actual file on disk
         with open(args.manifest, "w", encoding="utf-8") as f:
@@ -216,17 +237,8 @@ if __name__ == "__main__":
         print(f"Successfully merged. Output: {result_path}")
 
     except FileExistsError as e:
-        if args.overwrite:
-            # In a real production environment, we'd implement a more robust
-            # deletion/replacement strategy, but for this script we follow the spec.
-            print("Overwrite requested. Re-running merge...")
-            # This is a simplified retry for the CLI context
-            # We'd need to find the target path to delete it.
-            # For simplicity in this script, we assume the user knows the target.
-            sys.exit(1)
-        else:
-            print(f"Error: {e}", file=sys.stderr)
-            sys.exit(1)
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"Fatal Error: {e}", file=sys.stderr)
         sys.exit(1)

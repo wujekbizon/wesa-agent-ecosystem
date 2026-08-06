@@ -1,26 +1,27 @@
 """
 WESA Agent Ecosystem - Gemini Agent
 
-** REVIVED 2026-06-20 ** (was dead 2026-06-13 -> 2026-06-20, E0.3 audit)
-Gemini free tier expired 2026-05-07; Greg provisioned a new GOOGLE_API_KEY on
-2026-06-20 (3-month free trial, EXPIRES 2026-09-20). Key lives in .env (this
-module reads it via os.getenv("GOOGLE_API_KEY") below — there is no
-vault-injection wiring yet, that's E1 provider-abstraction work) and is
-mirrored in secure_core vault (status=active, rotate_by=2026-09-20) for
-audit/redaction coverage. src.router constructs this class normally again
-for any skill with model='gemini' — see router.py _get_agent().
+** MIGRATED 2026-07-21 ** — from Gemini Developer API (GOOGLE_API_KEY, a
+free-trial key that expired on a fixed clock) to Vertex AI (ADC / OAuth2,
+dedicated GCP project, no trial expiry to track). Auth is now resolved by
+src/vertex_client.py — see that module's docstring for the full precedence
+and the setup runbook
+(_plans/2026-07-21_wesa_vertex-ai-adc-migration-plan.md). This class no
+longer touches GOOGLE_API_KEY at all. src.router constructs this class
+normally for any skill with model='gemini' — see router.py _get_agent().
 
-ACTION BY 2026-09-20: renew/replace the key or this whole fleet (R1, W1, UX1,
-FE1, PM1, Q1, SU1, T1, A1, EX1) goes dark again. See the 2026-06-14 Gemini
-replacement options report (_plans/) if migrating off Google instead.
+History kept for context: the old GOOGLE_API_KEY was a 3-month free trial
+provisioned 2026-06-20 (expiring 2026-09-20) after the original key died
+2026-05-07. That whole trial-tracking problem goes away with this migration
+— the hard_deadline entry in AXEL_ORCHESTRATION.yaml has been superseded.
 
-Still relevant context from the dead period, kept for the provider rewrite:
+Still relevant context, kept for the provider rewrite:
   - this is a working reference implementation of the agent.run() contract
     that OllamaAgent and the future OpenAICompatProvider/ClaudeCodeProvider
     (E1) also implement.
   - `google-genai` lives in the optional `gemini-legacy` extra in
-    pyproject.toml rather than core deps — still true, not undone by reviving
-    the key. Reinstall that extra if a fresh environment errors on import.
+    pyproject.toml (requirements.txt installs it directly regardless).
+    Reinstall that extra if a fresh environment errors on import.
 
 ---
 Handles: research, analysis, writing, QA review tasks.
@@ -29,15 +30,14 @@ Model: gemini-2.5-flash
 This agent supports optional Google Search grounding for research-intensive tasks.
 Pass use_web_search=True to enable dynamic tool-based retrieval via the Google Search API.
 When disabled (default), the agent operates in standard mode without external tool calls.
+Grounding works identically in Vertex AI mode (same google_search tool via the
+unified SDK) — re-verify against R1's first post-migration run regardless.
 """
 import os
 import concurrent.futures
-from google import genai
 from google.genai import types
-from dotenv import load_dotenv
+from src.vertex_client import get_client
 from src.mcp_client import MCPClient, MCPTool
-
-load_dotenv()
 
 DEFAULT_SYSTEM_PROMPT = """You are a WESA worker agent. Execute tasks efficiently.
 Return clean, structured results. Be concise. No unnecessary filler."""
@@ -53,8 +53,8 @@ class GeminiAgent:
         timeout_override: int | None = None,
     ):
         self._timeout = timeout_override if timeout_override else int(os.getenv("GEMINI_TIMEOUT", "120"))
-        self.client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-        
+        self.client = get_client()
+
         if model_override:
             self._model_name = model_override
         else:

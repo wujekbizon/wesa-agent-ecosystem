@@ -8,6 +8,15 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+# Same fix as pdf_chunker.py: this is a long-running --watch loop invoked
+# directly in a Windows console (not just piped as a subprocess), and error
+# messages it prints can embed subprocess stderr or manifest content
+# containing non-ASCII characters. Force UTF-8 so one bad character doesn't
+# kill the whole watcher.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 from merge_utils import merge_book
 
 # Path Resolution (WESA Standard: No traversing parent chains via __file__.parent.parent)

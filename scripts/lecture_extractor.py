@@ -1,11 +1,20 @@
-# ** BLOCKED AS OF 2026-06-13 (E0.3 audit) **
-# Requires GOOGLE_API_KEY (Gemini Files API + gemini-2.5-flash) — Gemini
-# access is dead, free tier ended 2026-05-07, key removed from .env.
+# ** STILL BLOCKED AS OF 2026-07-21 — NOT part of the Vertex AI/ADC migration **
+# This script uses the Gemini Developer API's Files API (client.files.upload
+# for video, polled until ACTIVE) — a Developer-API-only surface. Vertex AI
+# has no equivalent "upload a file, get an ephemeral handle back" endpoint;
+# the Vertex path for large media is GCS bucket references or inline bytes,
+# which is a different implementation, not a drop-in swap to
+# src/vertex_client.py like gemini_agent.py and test_connection.py got.
+# Left on GOOGLE_API_KEY (still reads os.environ.get("GOOGLE_API_KEY") below,
+# which no longer exists in .env as of the 2026-07-21 migration — commented
+# out, see .env). Do not run as-is — it will exit(1) at the API key check.
 # This pipeline is part of the Wolfmed pielegniarstwo content build
-# (WOLFMED_PIPELINE.md) and is currently blocked until E1's provider
-# abstraction lands and a local-model extraction path (Ollama vision model,
-# or a re-provisioned key via secure_core.vault) is wired in. Do not run
-# as-is — it will exit(1) at GOOGLE_API_KEY check.
+# (WOLFMED_PIPELINE.md). Reviving it needs its own small design pass: either
+# rewrite _poll_until_active/upload for Vertex's GCS-backed file handling, or
+# wait for E1's provider abstraction and route it through a local-model
+# vision path (Ollama) instead. Do not fold this into the ADC migration
+# without that decision — it's a different API surface, not just a different
+# auth mode.
 import argparse
 import json
 import os

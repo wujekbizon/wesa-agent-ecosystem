@@ -28,12 +28,20 @@ dev = [
     # system with the live smoke scripts against Neon instead of pgserver.
     "pgserver>=0.1.4; platform_system != 'Windows'",
 ]
-# google-genai intentionally NOT listed as a core dependency anymore.
-# Gemini access is dead (2026-05-07). Code paths that import it are
-# tracked in E0.3 (dead Gemini code audit) and either removed or
-# isolated behind an optional extra.
+# google-genai kept as an optional extra rather than a core dependency —
+# historical from E0.3 (dead-Gemini audit, 2026-06-13) when the free API key
+# had expired. Still true today for a different reason: 2026-07-21 migrated
+# this fleet from the API-key-gated Developer API to Vertex AI (ADC, no trial
+# clock), which is live and actively used (R1/W1/UX1/FE1/PM1/Q1/SU1/T1/A1/EX1
+# all route through it) — but requirements.txt still installs it directly
+# regardless of this extra, so `pip install -r requirements.txt` (the
+# documented Quick Start path in README.md) always has it. Promote to a core
+# `dependencies` entry when the E1 provider-abstraction rewrite lands and
+# picks one install path. google-auth added alongside for src/vertex_client.py
+# (service-account credential parsing).
 gemini-legacy = [
     "google-genai>=1.0.0",
+    "google-auth>=2.0.0",
 ]
 
 [build-system]

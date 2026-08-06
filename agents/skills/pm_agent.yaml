@@ -1,7 +1,7 @@
 name: PM1
 role: Project Manager Agent
 model: gemini
-gemini_model: gemini-3-flash-preview
+gemini_model: gemini-2.5-flash
 task_types:
   - manage
   - coordinate

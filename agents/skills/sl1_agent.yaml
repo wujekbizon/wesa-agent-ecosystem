@@ -1,7 +1,7 @@
 name: SL1
 role: Wolfmed Lecture Slides Question Generator
 model: gemini
-gemini_model: gemini-3.1-pro-preview
+gemini_model: gemini-2.5-flash
 gemini_timeout: 600
 task_types:
   - generate_from_slides

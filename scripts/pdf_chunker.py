@@ -26,6 +26,20 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+# This script prints raw snippets of extracted PDF text (see score_page /
+# find_content_boundaries below) while scanning for skip-worthy pages. On
+# Windows, a subprocess's stdout defaults to the console's legacy codepage
+# (cp1252/cp1250/cp852 depending on locale) instead of UTF-8, so any
+# non-ASCII character in the source PDF — arrows, smart quotes, Polish
+# diacritics in some codepages, etc. — can crash print() with
+# UnicodeEncodeError and take down the whole chunking subprocess. Force UTF-8
+# on both streams so extracted text is always printable regardless of the
+# invoking console's codepage. (errors="replace" so a genuinely unprintable
+# byte degrades to "?" instead of crashing again.)
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 try:
     from pypdf import PdfReader, PdfWriter
 except ImportError:
