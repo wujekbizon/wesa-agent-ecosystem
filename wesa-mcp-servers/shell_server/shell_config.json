@@ -1,32 +1,5 @@
 {
-  "allowlist": [
-    "python",
-    "python3",
-    "pip",
-    "pip3",
-    "pytest",
-    "ruff",
-    "mypy",
-    "git",
-    "npm",
-    "npx",
-    "node",
-    "ls",
-    "cat",
-    "echo",
-    "mkdir",
-    "cp",
-    "mv",
-    "rm",
-    "grep",
-    "find",
-    "head",
-    "tail",
-    "wc",
-    "diff",
-    "docker",
-    "docker-compose"
-  ],
+  "allowlist": [],
   "timeout_seconds": 30,
   "workspace_root": "/workspace"
 }

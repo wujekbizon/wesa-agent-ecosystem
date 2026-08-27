@@ -13,6 +13,8 @@ CONFIG_PATH = os.getenv("SHELL_CONFIG_PATH", "/app/config.json")
 ALLOWLIST: list[str] = ["echo"]
 TIMEOUT_SECONDS: int = 30
 WORKSPACE_ROOT: str = "/workspace"
+MCP_BIND_HOST = os.getenv("WESA_MCP_BIND_HOST", "127.0.0.1")
+EXEC_ENABLED = os.getenv("WESA_MCP_ALLOW_EXEC", "false").lower() == "true"
 
 
 def load_config() -> None:
@@ -33,8 +35,14 @@ load_config()
 mcp = FastMCP("shell-server")
 
 
+def _require_exec_enabled() -> None:
+    if not EXEC_ENABLED:
+        raise PermissionError("Shell execution disabled by P0 containment")
+
+
 @mcp.tool()
 def run_command(command: str, args: list[str], cwd: str = "/workspace") -> str:
+    _require_exec_enabled()
     # Security check a: command must be in allowlist
     if command not in ALLOWLIST:
         raise ValueError(f"Command not allowed: {command}")
@@ -78,4 +86,4 @@ app.routes.insert(0, Route("/health", health_check))
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    uvicorn.run(app, host=MCP_BIND_HOST, port=8002)

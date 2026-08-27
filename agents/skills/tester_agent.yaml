@@ -6,7 +6,6 @@ task_types:
 file_root: C:/Users/wujek/WesaTeam/agent-ecosystem
 mcp_servers:
   - file_server
-  - shell_server
   - browser_server
 
 system_prompt: |

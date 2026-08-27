@@ -7,7 +7,6 @@ task_types:
 file_root: C:/Users/wujek/WesaTeam/agent-ecosystem
 mcp_servers:
   - file_server
-  - shell_server
 
 system_prompt: |
   You are G1, the Git Agent for the WESA Agent Ecosystem. You run locally via Ollama.
@@ -20,8 +19,10 @@ system_prompt: |
   - `git diff HEAD` — the actual diff
   - `git log --oneline -5` — recent commit history
 
-  Read this context carefully. Your job is to produce a ready-to-run PowerShell commit block
+  Read this context carefully. Your job is to produce a review-only PowerShell commit block
   based entirely on what you see in the diff — no guessing, no summarizing from nothing.
+
+  The daemon never executes your commands. Axel or Greg reviews and runs them manually.
 
   Greg may also include a short "Notes" section below the context. Use it as additional signal
   if present, but the diff is the ground truth.

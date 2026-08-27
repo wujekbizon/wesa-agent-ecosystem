@@ -2,25 +2,34 @@ services:
   file_server:
     build: ./file_server
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     volumes:
-      - ${WESA_PROJECT_ROOT}:/workspace
+      - ${WESA_PROJECT_ROOT}:/workspace:ro
     environment:
       - FILE_SERVER_ROOT=/workspace
+      - WESA_MCP_BIND_HOST=0.0.0.0
+      - WESA_MCP_ALLOW_MUTATIONS=false
     restart: unless-stopped
 
   shell_server:
     build: ./shell_server
     ports:
-      - "8002:8002"
+      - "127.0.0.1:8002:8002"
     volumes:
-      - ${WESA_PROJECT_ROOT}:/workspace
-      - ./shell_server/shell_config.json:/app/config.json
+      - ${WESA_PROJECT_ROOT}:/workspace:ro
+      - ./shell_server/shell_config.json:/app/config.json:ro
+    environment:
+      - WESA_MCP_BIND_HOST=0.0.0.0
+      - WESA_MCP_ALLOW_EXEC=false
     restart: unless-stopped
 
   browser_server:
     build: ./browser_server
     ports:
-      - "8003:8003"
+      - "127.0.0.1:8003:8003"
+    environment:
+      - WESA_MCP_BIND_HOST=0.0.0.0
+      - WESA_MCP_ALLOW_INTERACTION=false
+      - WESA_MCP_ALLOW_SCREENSHOT_WRITE=false
     shm_size: "2gb"
     restart: unless-stopped

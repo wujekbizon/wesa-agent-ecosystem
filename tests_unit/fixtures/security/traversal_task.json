@@ -1,0 +1,7 @@
+{
+  "id": "p0-traversal-task",
+  "type": "write",
+  "prompt": "Containment regression fixture",
+  "status": "pending",
+  "output_file": "../../outside-workspace.txt"
+}

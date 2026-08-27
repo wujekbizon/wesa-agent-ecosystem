@@ -1,6 +1,5 @@
 import argparse
 import json
-import shutil
 import subprocess
 import sys
 import time
@@ -17,7 +16,7 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
-from merge_utils import merge_book
+from merge_utils import rebuild_category, release_is_current
 
 # Path Resolution (WESA Standard: No traversing parent chains via __file__.parent.parent)
 # We assume the script is located in agent-ecosystem/scripts/
@@ -178,11 +177,14 @@ def process_new_pdf(pdf_path: Path, category: str):
 
 def poll_tasks(category: str):
     """Step 3: Poll TASKS_DIR for completed extraction and validation tasks."""
-    # We need to find all manifests in CHUNKS_DIR
+    categories_to_merge: set[str] = set()
     for manifest_path in DATA_DIR.glob("*_manifest.json"):
         manifest = load_manifest(manifest_path)
-        # Only process manifests belonging to the target category if specified
-        # (Assuming manifest contains category info or we check folder structure)
+        manifest_category = manifest.get("category")
+        if category != "all" and manifest_category != category:
+            continue
+        if manifest.get("mode") == "generate_slides":
+            continue
 
         changed = False
 
@@ -277,32 +279,30 @@ def poll_tasks(category: str):
         if changed:
             atomic_write_json(manifest_path, manifest)
 
-        # Step 4: Check for Merge Trigger
-        if manifest.get("validated_count", 0) == len(manifest.get("chunks", [])):
-            # Don't trust merge_status alone — it's a one-way "done" flag that
-            # survives even if the merged output file is later deleted or moved.
-            # Verify the expected output still exists on disk before treating
-            # this manifest as finished; otherwise re-trigger the merge.
-            expected_output = DONE_DIR / f"{manifest.get('category', 'unknown')}_all_merged.json"
-            merge_already_done = manifest.get("merge_status") == "done" and expected_output.exists()
+        chunks = manifest.get("chunks", [])
+        derived_validated_count = sum(
+            chunk.get("status") in ("validated", "done") for chunk in chunks
+        )
+        if manifest.get("validated_count") != derived_validated_count:
+            manifest["validated_count"] = derived_validated_count
+            atomic_write_json(manifest_path, manifest)
 
-            if not merge_already_done:
-                print(f"All chunks validated for {manifest_path.name}. Triggering merge...")
-                try:
-                    merge_book(manifest)
-                    manifest["merge_status"] = "done"
-                    atomic_write_json(manifest_path, manifest)
+        if chunks and derived_validated_count == len(chunks):
+            if manifest.get("merge_status") != "done" or not release_is_current(
+                manifest_category
+            ):
+                categories_to_merge.add(manifest_category)
 
-                    # Move source PDF to done
-                    # We assume the manifest stores the original source path
-                    src_pdf = Path(manifest["source_pdf"])
-                    if src_pdf.exists():
-                        dest_dir = src_pdf.parent / "done"
-                        dest_dir.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(src_pdf), str(dest_dir / src_pdf.name))
-                        print(f"Pipeline complete for {src_pdf.name}. Moved to done/.")
-                except Exception as e:
-                    print(f"Error during merge for {manifest_path.name} — {e}", file=sys.stderr)
+    for manifest_category in sorted(categories_to_merge):
+        print(f"Rebuilding complete category bank: {manifest_category}")
+        try:
+            result = rebuild_category(manifest_category)
+            print(
+                f"Category merge complete: {result.output_path.name} "
+                f"({result.question_count} questions)"
+            )
+        except Exception as e:
+            print(f"Error rebuilding category {manifest_category} — {e}", file=sys.stderr)
 
 
 def manifest_exists_for_pdf(pdf_path: Path) -> bool:

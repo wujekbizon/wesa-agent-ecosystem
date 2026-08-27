@@ -25,7 +25,7 @@ ECOSYSTEM_DIR = SCRIPT_DIR.parent
 WESA_DIR = ECOSYSTEM_DIR.parent
 EXTRACTOR_DIR = WESA_DIR / "extractor"
 
-OUTPUTS_DIR = EXTRACTOR_DIR / "outputs"
+OUTPUTS_DIR = ECOSYSTEM_DIR / "extractor" / "outputs"
 DATA_DIR = EXTRACTOR_DIR / "data"
 DONE_DIR = EXTRACTOR_DIR / "done"
 
@@ -45,7 +45,7 @@ def scan_outputs_for_chunk(chunk: dict) -> tuple[str | None, str | None]:
     Returns (raw_json_path, validated_json_path) — either can be None.
     """
     chunk_id = chunk["id"]
-    raw_path = OUTPUTS_DIR / f"{chunk_id}.json"
+    raw_path = OUTPUTS_DIR / f"{chunk_id}_raw.json"
     validated_path = OUTPUTS_DIR / f"{chunk_id}_validated.json"
 
     raw = str(raw_path) if raw_path.exists() and raw_path.stat().st_size > 10 else None
@@ -69,9 +69,13 @@ def check_manifest(manifest_path: Path, auto_merge: bool = True) -> dict:
     book = manifest["book"]
     merge_status = manifest.get("merge_status", "pending")
 
-    if merge_status in ("done", "failed"):
-        print(f"[manifest_checker] {book}: merge already {merge_status}, skipping")
-        return manifest
+    if merge_status == "done":
+        sys.path.insert(0, str(SCRIPT_DIR))
+        from merge_utils import release_is_current
+
+        if release_is_current(manifest["category"]):
+            print(f"[manifest_checker] {book}: merge already current, skipping")
+            return manifest
 
     print(f"[manifest_checker] Checking {book} ({manifest['total_chunks']} chunks)...")
 
@@ -168,9 +172,13 @@ def check_all_manifests(auto_merge: bool = True) -> list[dict]:
     for mp in sorted(manifests):
         try:
             manifest = _load_manifest(mp)
-            if manifest.get("merge_status") in ("done",):
-                print(f"[manifest_checker] {manifest['book']}: already complete, skipping")
-                continue
+            if manifest.get("merge_status") == "done":
+                sys.path.insert(0, str(SCRIPT_DIR))
+                from merge_utils import release_is_current
+
+                if release_is_current(manifest["category"]):
+                    print(f"[manifest_checker] {manifest['book']}: already complete, skipping")
+                    continue
             result = check_manifest(mp, auto_merge=auto_merge)
             results.append(result)
         except Exception as e:

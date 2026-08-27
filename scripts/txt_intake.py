@@ -17,16 +17,16 @@ Flow:
 """
 
 import argparse
-import hashlib
 import json
 import os
 import re
-import sqlite3
 import sys
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+
+from merge_utils import rebuild_category, release_is_current
 
 
 def repair_json(raw: str) -> str:
@@ -67,7 +67,6 @@ DATA_DIR = EXTRACTOR_DIR / "data"
 DONE_DIR = EXTRACTOR_DIR / "done"
 OUTPUTS_DIR = ECOSYSTEM_DIR / "extractor" / "outputs"
 TASKS_DIR = ECOSYSTEM_DIR / "tasks"
-WOLFMED_DB = DATA_DIR / "wolfmed.db"
 
 
 # ---------------------------------------------------------------------------
@@ -134,33 +133,6 @@ def manifest_path_for(stem: str) -> Path:
 
 def manifest_exists(stem: str) -> bool:
     return manifest_path_for(stem).exists()
-
-
-# ---------------------------------------------------------------------------
-# UUID registry (mirrors merge_utils logic — operates on wolfmed.db directly)
-# ---------------------------------------------------------------------------
-
-
-def get_db_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(WOLFMED_DB)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def initialize_db():
-    conn = get_db_connection()
-    try:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS uuid_registry (
-                uuid TEXT PRIMARY KEY,
-                category TEXT,
-                question_hash TEXT,
-                registered_at TEXT
-            )
-        """)
-        conn.commit()
-    finally:
-        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +206,7 @@ def process_new_txt(txt_path: Path, category: str):
 
 
 def poll_tasks(category_filter: str | None):
+    categories_to_merge: set[str] = set()
     for manifest_path in DATA_DIR.glob("*_manifest.json"):
         manifest = load_manifest(manifest_path)
 
@@ -305,119 +278,36 @@ def poll_tasks(category_filter: str | None):
             manifest["updated_at"] = datetime.now().isoformat()
             atomic_write_json(manifest_path, manifest)
 
-        # --- Merge trigger ---
-        if manifest.get("validated_count", 0) == 1 and manifest.get("merge_status") != "done":
-            try:
-                merge_slides(manifest, manifest_path)
-            except Exception as e:
-                print(f"Error merging {manifest_path.name}: {e}", file=sys.stderr)
+        derived_validated_count = int(chunk.get("status") in ("validated", "done"))
+        if manifest.get("validated_count") != derived_validated_count:
+            manifest["validated_count"] = derived_validated_count
+            atomic_write_json(manifest_path, manifest)
+
+        category = manifest["category"]
+        if derived_validated_count == 1 and (
+            manifest.get("merge_status") != "done" or not release_is_current(category)
+        ):
+            categories_to_merge.add(category)
+
+    for category in sorted(categories_to_merge):
+        try:
+            result = rebuild_category(category)
+            print(
+                f"Category merge complete: {result.output_path.name} "
+                f"({result.question_count} questions)"
+            )
+        except Exception as e:
+            print(f"Error rebuilding category {category}: {e}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
-# Phase 4: Inline merge (cannot use merge_utils.merge_book — wrong glob pattern)
+# Phase 4: Compatibility wrapper; canonical logic lives in merge_utils.py
 # ---------------------------------------------------------------------------
 
 
 def merge_slides(manifest: dict, manifest_path: Path):
-    stem = manifest["book"]
-    category = manifest["category"]
-    validated_path = OUTPUTS_DIR / f"{stem}_validated.json"
-    output_path = DONE_DIR / f"{category}_all_merged.json"
-
-    if not validated_path.exists():
-        print(f"Error: validated file missing: {validated_path}", file=sys.stderr)
-        return
-
-    with open(validated_path, encoding="utf-8") as f:
-        raw = f.read()
-
-    try:
-        entries = json.loads(repair_json(raw))
-    except (json.JSONDecodeError, ValueError) as e:
-        print(f"Error: could not parse validated JSON for {stem}: {e}", file=sys.stderr)
-        return
-
-    if not isinstance(entries, list):
-        print(f"Error: validated JSON is not a list in {validated_path}", file=sys.stderr)
-        return
-
-    initialize_db()
-    conn = get_db_connection()
-
-    # Load existing questions from category file to seed dedup sets
-    existing_entries = []
-    seen_questions = set()
-    if output_path.exists():
-        try:
-            with open(output_path, encoding="utf-8") as f:
-                existing_entries = json.load(f)
-            for e in existing_entries:
-                q = e.get("data", {}).get("question", "")
-                if isinstance(q, str) and q.strip():
-                    seen_questions.add(q.strip().lower())
-        except Exception as e:
-            print(f"Warning: could not load existing {output_path.name}: {e}", file=sys.stderr)
-            existing_entries = []
-
-    clean = list(existing_entries)
-    now = datetime.now().isoformat()
-
-    try:
-        for entry in entries:
-            # Structural validation
-            data = entry.get("data", {})
-            question = data.get("question", "")
-            answers = data.get("answers", [])
-
-            if not isinstance(question, str) or len(question.strip()) < 5:
-                continue
-            if not isinstance(answers, list) or len(answers) != 4:
-                continue
-            if sum(1 for a in answers if a.get("isCorrect") is True) != 1:
-                continue
-
-            # Dedup by question text
-            q_norm = question.strip().lower()
-            if q_norm in seen_questions:
-                continue
-
-            # Normalise meta
-            meta = entry.setdefault("meta", {})
-            meta.setdefault("course", "pielegniarstwo")
-            meta.setdefault("category", category)
-
-            # UUID uniqueness
-            current_uuid = entry.get("id", str(uuid.uuid4()))
-            cursor = conn.execute("SELECT uuid FROM uuid_registry WHERE uuid = ?", (current_uuid,))
-            if cursor.fetchone():
-                current_uuid = str(uuid.uuid4())
-                entry["id"] = current_uuid
-
-            q_hash = hashlib.sha256(q_norm.encode()).hexdigest()
-            conn.execute(
-                "INSERT OR IGNORE INTO uuid_registry (uuid, category, question_hash, registered_at) "
-                "VALUES (?, ?, ?, ?)",
-                (current_uuid, category, q_hash, now),
-            )
-
-            clean.append(entry)
-            seen_questions.add(q_norm)
-
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
-
-    atomic_write_json(output_path, clean)
-
-    manifest["merge_status"] = "done"
-    manifest["updated_at"] = now
-    atomic_write_json(manifest_path, manifest)
-
-    new_count = len(clean) - len(existing_entries)
-    print(f"Appended {new_count} questions to {output_path.name} (total: {len(clean)})")
+    result = rebuild_category(manifest["category"])
+    print(f"Rebuilt {result.output_path.name} ({result.question_count} questions)")
 
 
 # ---------------------------------------------------------------------------
@@ -473,48 +363,6 @@ def run_watcher(category_filter: str | None):
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Wolfmed TXT Intake — lecture slide question generation pipeline"
-    )
-    parser.add_argument("--category", type=str, help="Filter to specific category folder")
-    parser.add_argument("--watch", action="store_true", help="Continuous polling every 30s")
-    parser.add_argument("--check-merges", action="store_true", help="List pending merges")
-
-    args = parser.parse_args()
-
-    try:
-        if args.check_merges:
-            check_merges(args.category)
-        elif args.watch:
-            run_watcher(args.category)
-        else:
-            run_one_shot(args.category)
-    except KeyboardInterrupt:
-        print("\nStopped.")
-        sys.exit(0)
-    except Exception as e:
-        print(f"Fatal error: {e}", file=sys.stderr)
-        sys.exit(1)
-        time.sleep(30)
-
-
-def check_merges(category_filter: str | None):
-    found = False
-    for manifest_path in DATA_DIR.glob("*_manifest.json"):
-        manifest = load_manifest(manifest_path)
-        if manifest.get("mode") != "generate_slides":
-            continue
-        if category_filter and manifest.get("category") != category_filter:
-            continue
-        if manifest.get("merge_status") != "done":
-            vc = manifest.get("validated_count", 0)
-            print(f"Pending: {manifest_path.name} ({vc}/1 validated)")
-            found = True
-    if not found:
-        print("No pending slide merges.")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

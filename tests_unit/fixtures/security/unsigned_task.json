@@ -1,0 +1,7 @@
+{
+  "id": "p0-unsigned-task",
+  "type": "write",
+  "prompt": "Containment regression fixture",
+  "status": "pending",
+  "output_file": "logs/p0-fixture.md"
+}
